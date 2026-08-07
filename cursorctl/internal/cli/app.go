@@ -38,6 +38,7 @@ type App struct {
 
 	mu              sync.Mutex
 	bridge          *bridge.Bridge
+	clientOverride  *bridge.Client
 	prepared        bool
 	preparedContext context.Context
 }
@@ -72,6 +73,9 @@ func (a *App) prepareContext(ctx context.Context) (context.Context, error) {
 func (a *App) Client(ctx context.Context) (*bridge.Client, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.clientOverride != nil {
+		return a.clientOverride, nil
+	}
 	if a.bridge != nil {
 		return a.bridge.Client(), nil
 	}

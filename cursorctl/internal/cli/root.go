@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -16,6 +17,10 @@ func Execute() int {
 	}
 	if err != nil {
 		fmt.Fprintf(app.Err, "error: %v\n", err)
+		var exitError *ExitError
+		if errors.As(err, &exitError) {
+			return exitError.Code
+		}
 		return ExitCLIError
 	}
 	return ExitOK
@@ -63,7 +68,11 @@ func NewRootCommand() (*cobra.Command, *App) {
 	)
 	flags.BoolVarP(&app.Verbose, "verbose", "v", false, "Show SDK bridge diagnostics")
 
-	root.AddCommand(newBridgeCommand(app))
+	root.AddCommand(
+		newBridgeCommand(app),
+		newAgentCommand(app),
+		newRunCommand(app),
+	)
 	return root, app
 }
 
@@ -74,4 +83,17 @@ func prepareCommand(app *App, command *cobra.Command) error {
 	}
 	command.SetContext(ctx)
 	return nil
+}
+
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *ExitError) Unwrap() error {
+	return e.Err
 }
