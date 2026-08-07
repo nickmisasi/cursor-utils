@@ -71,15 +71,13 @@ func newAgentSendCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			allowedJSONFlags := append([]string{"quiet", "detach"}, customToolFlagNames...)
 			request, raw, err := jsonRequest(
 				app,
 				command,
 				args,
 				jsonValue,
-				"quiet",
-				"detach",
-				"custom-tool",
-				"custom-tool-config",
+				allowedJSONFlags...,
 			)
 			if err != nil {
 				return err
@@ -90,11 +88,6 @@ func newAgentSendCommand(app *App) *cobra.Command {
 				}
 				request, err = buildSendRequest(app, command, args[0], args[1:], &flags, &shared)
 				if err != nil {
-					return err
-				}
-			}
-			if len(tools.registry) != 0 {
-				if err := injectSendCustomTools(request, tools.declarations); err != nil {
 					return err
 				}
 			}

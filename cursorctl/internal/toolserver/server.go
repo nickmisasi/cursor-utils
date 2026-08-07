@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,7 +18,11 @@ import (
 	"time"
 )
 
-const callbackPath = "/sdk.v1.SdkCustomToolCallbackService/CallCustomTool"
+const (
+	callbackPath       = "/sdk.v1.SdkCustomToolCallbackService/CallCustomTool"
+	maxRequestBytes    = 1 << 20
+	maxToolOutputBytes = 4 << 20
+)
 
 type Tool struct {
 	Description string
@@ -25,9 +31,10 @@ type Tool struct {
 }
 
 type Server struct {
-	server   *http.Server
-	listener net.Listener
-	token    string
+	server    *http.Server
+	listener  net.Listener
+	token     string
+	serveDone chan error
 }
 
 func Start(tools map[string]Tool) (*Server, error) {
@@ -40,11 +47,19 @@ func Start(tools map[string]Tool) (*Server, error) {
 		return nil, fmt.Errorf("listen for custom tool callbacks: %w", err)
 	}
 	mux := http.NewServeMux()
-	instance := &Server{listener: listener, token: token}
+	instance := &Server{
+		listener:  listener,
+		token:     token,
+		serveDone: make(chan error, 1),
+	}
 	mux.Handle(callbackPath, newHandler(token, tools))
 	instance.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
-		_ = instance.server.Serve(listener)
+		err := instance.server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		instance.serveDone <- err
 	}()
 	return instance, nil
 }
@@ -58,23 +73,32 @@ func (s *Server) AuthToken() string {
 }
 
 func (s *Server) Close(ctx context.Context) error {
-	if err := s.server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shut down custom tool server: %w", err)
+	shutdownErr := s.server.Shutdown(ctx)
+	if shutdownErr != nil {
+		return fmt.Errorf("shut down custom tool server: %w", shutdownErr)
+	}
+	serveErr := <-s.serveDone
+	if serveErr != nil {
+		return fmt.Errorf("serve custom tool callbacks: %w", serveErr)
 	}
 	return nil
 }
 
 func newHandler(token string, tools map[string]Tool) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
 		if request.Method != http.MethodPost {
-			writeConnectError(writer, http.StatusMethodNotAllowed, "unimplemented", "method not allowed")
+			writer.Header().Set("Allow", http.MethodPost)
+			writer.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		if request.Header.Get("Authorization") != "Bearer "+token {
+		writer.Header().Set("Content-Type", "application/json")
+		expectedAuth := []byte("Bearer " + token)
+		actualAuth := []byte(request.Header.Get("Authorization"))
+		if subtle.ConstantTimeCompare(actualAuth, expectedAuth) != 1 {
 			writeConnectError(writer, http.StatusUnauthorized, "unauthenticated", "Unauthorized")
 			return
 		}
+		request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBytes)
 		var call struct {
 			ToolName   string          `json:"toolName"`
 			Args       json.RawMessage `json:"args"`
@@ -117,20 +141,32 @@ func execute(
 		shell, arguments = "cmd.exe", []string{"/C", command}
 	}
 	process := exec.CommandContext(ctx, shell, arguments...)
+	configureProcessCancellation(process)
+	process.WaitDelay = time.Second
 	process.Stdin = bytes.NewReader(input)
 	process.Env = append(
-		toolEnvironment(),
+		os.Environ(),
 		"CURSORCTL_TOOL_NAME="+toolName,
 		"CURSORCTL_TOOL_CALL_ID="+toolCallID,
 		"CURSORCTL_AGENT_ID="+agentID,
 	)
-	var stdout, stderr bytes.Buffer
-	process.Stdout = &stdout
-	process.Stderr = &stderr
-	if err := process.Run(); err != nil {
+	stdout := &limitedBuffer{limit: maxToolOutputBytes}
+	stdout.onLimit = func() {
+		if process.Cancel != nil {
+			_ = process.Cancel()
+		}
+	}
+	stderr := &limitedBuffer{limit: maxToolOutputBytes}
+	process.Stdout = stdout
+	process.Stderr = stderr
+	runErr := process.Run()
+	if stdout.exceeded {
+		return map[string]any{"error": "tool output too large"}
+	}
+	if runErr != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
-			message = err.Error()
+			message = runErr.Error()
 		}
 		return map[string]any{"error": message}
 	}
@@ -141,17 +177,37 @@ func execute(
 	return map[string]any{"output": stdout.String()}
 }
 
-func toolEnvironment() []string {
-	environment := make([]string, 0, len(os.Environ()))
-	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, "CURSORCTL_TOOL_NAME=") ||
-			strings.HasPrefix(entry, "CURSORCTL_TOOL_CALL_ID=") ||
-			strings.HasPrefix(entry, "CURSORCTL_AGENT_ID=") {
-			continue
-		}
-		environment = append(environment, entry)
+type limitedBuffer struct {
+	buffer   bytes.Buffer
+	limit    int
+	exceeded bool
+	onLimit  func()
+}
+
+func (b *limitedBuffer) Write(data []byte) (int, error) {
+	if b.exceeded {
+		return len(data), nil
 	}
-	return environment
+	remaining := b.limit - b.buffer.Len()
+	if len(data) <= remaining {
+		return b.buffer.Write(data)
+	}
+	if remaining > 0 {
+		_, _ = b.buffer.Write(data[:remaining])
+	}
+	b.exceeded = true
+	if b.onLimit != nil {
+		b.onLimit()
+	}
+	return len(data), nil
+}
+
+func (b *limitedBuffer) Bytes() []byte {
+	return b.buffer.Bytes()
+}
+
+func (b *limitedBuffer) String() string {
+	return b.buffer.String()
 }
 
 func writeResult(writer http.ResponseWriter, result map[string]any) {

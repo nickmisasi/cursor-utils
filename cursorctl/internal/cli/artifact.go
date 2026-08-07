@@ -31,10 +31,16 @@ func newArtifactListCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "ListArtifacts", 1, "artifact list", false, nil,
-				func(args []string, _ string) (map[string]any, error) {
-					return map[string]any{"agentId": args[0]}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:   "ListArtifacts",
+					argCount: 1,
+					use:      "artifact list",
+					build: func(args []string, _ string) (map[string]any, error) {
+						return map[string]any{"agentId": args[0]}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}
@@ -79,7 +85,7 @@ func downloadArtifact(
 	command *cobra.Command,
 	request map[string]any,
 	outputPath string,
-) error {
+) (resultErr error) {
 	if err := prepareCommand(app, command); err != nil {
 		return err
 	}
@@ -100,6 +106,7 @@ func downloadArtifact(
 
 	writer := app.Out
 	var file *os.File
+	fileClosed := false
 	if outputPath != "" && outputPath != "-" {
 		file, err = os.Create(outputPath)
 		if err != nil {
@@ -107,8 +114,15 @@ func downloadArtifact(
 		}
 		writer = file
 		defer func() {
-			if file != nil {
-				_ = file.Close()
+			if !fileClosed {
+				if err := file.Close(); resultErr == nil && err != nil {
+					resultErr = fmt.Errorf("close artifact file %s: %w", outputPath, err)
+				}
+			}
+			if resultErr != nil {
+				if err := os.Remove(outputPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					resultErr = errors.Join(resultErr, fmt.Errorf("remove partial artifact %s: %w", outputPath, err))
+				}
 			}
 		}()
 	}
@@ -122,7 +136,7 @@ func downloadArtifact(
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close artifact file %s: %w", outputPath, err)
 	}
-	file = nil
+	fileClosed = true
 	return app.Print(map[string]any{"path": outputPath, "bytes": count})
 }
 
@@ -139,6 +153,7 @@ func copyArtifactChunks(writer io.Writer, reader *bridge.StreamReader) (int64, e
 		if err != nil {
 			return total, err
 		}
+		// Proto3 JSON permits URL-safe/unpadded base64; the pinned bridge emits standard base64.
 		data, err := base64.StdEncoding.DecodeString(chunk.Data)
 		if err != nil {
 			return total, fmt.Errorf("decode artifact chunk: %w", err)

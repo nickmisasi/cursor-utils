@@ -43,35 +43,26 @@ func jsonRequest(
 }
 
 type unaryRequestBuilder func(args []string, apiKey string) (map[string]any, error)
-type unaryRPCWrapper func(request map[string]any, run func() error) error
+
+type unaryCommandSpec struct {
+	service       string
+	method        string
+	argCount      int
+	use           string
+	injectOptions bool
+	build         unaryRequestBuilder
+}
 
 func runUnaryCommand(
 	app *App,
 	command *cobra.Command,
 	args []string,
 	jsonValue string,
-	method string,
-	argCount int,
-	usage string,
-	injectOptions bool,
+	spec unaryCommandSpec,
 	allowedJSONFlags []string,
-	build unaryRequestBuilder,
-	wrappers ...unaryRPCWrapper,
 ) error {
-	return runServiceUnaryCommand(
-		app,
-		command,
-		args,
-		jsonValue,
-		"SdkAgentService",
-		method,
-		argCount,
-		usage,
-		injectOptions,
-		allowedJSONFlags,
-		build,
-		wrappers...,
-	)
+	spec.service = "SdkAgentService"
+	return runServiceUnaryCommand(app, command, args, jsonValue, spec, allowedJSONFlags)
 }
 
 func runServiceUnaryCommand(
@@ -79,40 +70,24 @@ func runServiceUnaryCommand(
 	command *cobra.Command,
 	args []string,
 	jsonValue string,
-	service string,
-	method string,
-	argCount int,
-	usage string,
-	injectOptions bool,
+	spec unaryCommandSpec,
 	allowedJSONFlags []string,
-	build unaryRequestBuilder,
-	wrappers ...unaryRPCWrapper,
 ) error {
 	request, err := buildUnaryRequest(
 		app,
 		command,
 		args,
 		jsonValue,
-		argCount,
-		usage,
-		injectOptions,
+		spec.argCount,
+		spec.use,
+		spec.injectOptions,
 		allowedJSONFlags,
-		build,
+		spec.build,
 	)
 	if err != nil {
 		return err
 	}
-	run := func() error {
-		return runRPC[map[string]any](app, command, service, method, request)
-	}
-	for index := len(wrappers) - 1; index >= 0; index-- {
-		next := run
-		wrapper := wrappers[index]
-		run = func() error {
-			return wrapper(request, next)
-		}
-	}
-	return run()
+	return runRPC[map[string]any](app, command, spec.service, spec.method, request)
 }
 
 func buildUnaryRequest(

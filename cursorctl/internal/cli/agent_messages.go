@@ -14,23 +14,30 @@ func newAgentMessagesCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "ListAgentMessages", 1, "agent messages", true, nil,
-				func(args []string, apiKey string) (map[string]any, error) {
-					options := map[string]any{"apiKey": apiKey}
-					if command.Flags().Changed("limit") {
-						options["limit"] = limit
-					}
-					if command.Flags().Changed("offset") {
-						options["offset"] = offset
-					}
-					if err := setRuntimeOption(command, options, runtime); err != nil {
-						return nil, err
-					}
-					if command.Flags().Changed("cwd") {
-						options["cwd"] = cwd
-					}
-					return map[string]any{"agentId": args[0], "options": options}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:        "ListAgentMessages",
+					argCount:      1,
+					use:           "agent messages",
+					injectOptions: true,
+					build: func(args []string, apiKey string) (map[string]any, error) {
+						options := map[string]any{"apiKey": apiKey}
+						if command.Flags().Changed("limit") {
+							options["limit"] = limit
+						}
+						if command.Flags().Changed("offset") {
+							options["offset"] = offset
+						}
+						if err := setRuntimeOption(command, options, runtime); err != nil {
+							return nil, err
+						}
+						if command.Flags().Changed("cwd") {
+							options["cwd"] = cwd
+						}
+						return map[string]any{"agentId": args[0], "options": options}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}
@@ -52,14 +59,20 @@ func newAgentUsageCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "GetUsage", 1, "agent usage", false, nil,
-				func(args []string, _ string) (map[string]any, error) {
-					request := map[string]any{"agentId": args[0]}
-					if command.Flags().Changed("run-id") {
-						request["runId"] = runID
-					}
-					return request, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:   "GetUsage",
+					argCount: 1,
+					use:      "agent usage",
+					build: func(args []string, _ string) (map[string]any, error) {
+						request := map[string]any{"agentId": args[0]}
+						if command.Flags().Changed("run-id") {
+							request["runId"] = runID
+						}
+						return request, nil
+					},
 				},
+				nil,
 			)
 		},
 	}

@@ -14,15 +14,17 @@ func newCatalogCommand(app *App, use string, method string, summary string) *cob
 				command,
 				args,
 				jsonValue,
-				"SdkCursorService",
-				method,
-				0,
-				use,
-				true,
-				nil,
-				func(_ []string, apiKey string) (map[string]any, error) {
-					return map[string]any{"options": map[string]any{"apiKey": apiKey}}, nil
+				unaryCommandSpec{
+					service:       "SdkCursorService",
+					method:        method,
+					argCount:      0,
+					use:           use,
+					injectOptions: true,
+					build: func(_ []string, apiKey string) (map[string]any, error) {
+						return map[string]any{"options": map[string]any{"apiKey": apiKey}}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}

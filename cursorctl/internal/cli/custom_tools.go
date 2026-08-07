@@ -20,18 +20,20 @@ type customToolSet struct {
 	declarations map[string]any
 }
 
+var customToolFlagNames = []string{"custom-tool", "custom-tool-config"}
+
 func addCustomToolFlags(command *cobra.Command, flags *customToolFlags) {
 	command.Flags().StringArrayVar(
 		&flags.entries,
 		"custom-tool",
 		nil,
-		"Local custom tool NAME=COMMAND (repeatable; args JSON is sent on stdin)",
+		"Tool NAME=COMMAND (repeatable); on agent send, solely starts the callback executor for tools declared at create",
 	)
 	command.Flags().StringVar(
 		&flags.config,
 		"custom-tool-config",
 		"",
-		"Local tool map {name:{description,inputSchema,command}} as JSON, @file, or -",
+		"Tool map {name:{description,inputSchema,command}} as JSON, @file, or -; on agent send, solely starts callback executors for tools declared at create",
 	)
 }
 
@@ -155,23 +157,8 @@ func injectAgentCustomTools(request map[string]any, declarations map[string]any)
 	return injectLocalCustomTools(options, declarations)
 }
 
-func injectSendCustomTools(request map[string]any, declarations map[string]any) error {
-	options, err := objectField(request, "options", false)
-	if err != nil {
-		return err
-	}
-	return injectLocalCustomTools(options, declarations)
-}
-
 func injectPromptCustomTools(composite map[string]any, declarations map[string]any) error {
-	if err := injectAgentCustomTools(composite, declarations); err != nil {
-		return err
-	}
-	sendOptions, err := objectField(composite, "sendOptions", false)
-	if err != nil {
-		return err
-	}
-	return injectLocalCustomTools(sendOptions, declarations)
+	return injectAgentCustomTools(composite, declarations)
 }
 
 func injectLocalCustomTools(options map[string]any, declarations map[string]any) error {

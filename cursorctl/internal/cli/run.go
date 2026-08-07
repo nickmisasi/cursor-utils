@@ -36,14 +36,21 @@ func newRunGetCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "GetRun", 1, "run get", true, nil,
-				func(args []string, apiKey string) (map[string]any, error) {
-					options, err := getRunOptions(command, runtime, cwd, agentID, apiKey)
-					if err != nil {
-						return nil, err
-					}
-					return map[string]any{"runId": args[0], "options": options}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:        "GetRun",
+					argCount:      1,
+					use:           "run get",
+					injectOptions: true,
+					build: func(args []string, apiKey string) (map[string]any, error) {
+						options, err := getRunOptions(command, runtime, cwd, agentID, apiKey)
+						if err != nil {
+							return nil, err
+						}
+						return map[string]any{"runId": args[0], "options": options}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}
@@ -67,23 +74,30 @@ func newRunListCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "ListRuns", 1, "run list", true, nil,
-				func(args []string, apiKey string) (map[string]any, error) {
-					options := map[string]any{"apiKey": apiKey}
-					if command.Flags().Changed("limit") {
-						options["limit"] = limit
-					}
-					if command.Flags().Changed("cursor") {
-						options["cursor"] = cursor
-					}
-					if err := setRuntimeOption(command, options, runtime); err != nil {
-						return nil, err
-					}
-					if command.Flags().Changed("cwd") {
-						options["cwd"] = cwd
-					}
-					return map[string]any{"agentId": args[0], "options": options}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:        "ListRuns",
+					argCount:      1,
+					use:           "run list",
+					injectOptions: true,
+					build: func(args []string, apiKey string) (map[string]any, error) {
+						options := map[string]any{"apiKey": apiKey}
+						if command.Flags().Changed("limit") {
+							options["limit"] = limit
+						}
+						if command.Flags().Changed("cursor") {
+							options["cursor"] = cursor
+						}
+						if err := setRuntimeOption(command, options, runtime); err != nil {
+							return nil, err
+						}
+						if command.Flags().Changed("cwd") {
+							options["cwd"] = cwd
+						}
+						return map[string]any{"agentId": args[0], "options": options}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}
@@ -187,14 +201,20 @@ func newRunCancelCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "CancelRun", 1, "run cancel", false, nil,
-				func(args []string, _ string) (map[string]any, error) {
-					request := map[string]any{"runId": args[0]}
-					if command.Flags().Changed("agent-id") {
-						request["agentId"] = agentID
-					}
-					return request, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:   "CancelRun",
+					argCount: 1,
+					use:      "run cancel",
+					build: func(args []string, _ string) (map[string]any, error) {
+						request := map[string]any{"runId": args[0]}
+						if command.Flags().Changed("agent-id") {
+							request["agentId"] = agentID
+						}
+						return request, nil
+					},
 				},
+				nil,
 			)
 		},
 	}

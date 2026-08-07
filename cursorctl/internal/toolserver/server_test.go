@@ -2,10 +2,13 @@ package toolserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +25,44 @@ func TestHandlerRejectsInvalidAuth(t *testing.T) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+}
+
+func TestHandlerRejectsNonPostWithBareResponse(t *testing.T) {
+	server := httptest.NewServer(newHandler("secret", map[string]Tool{}))
+	defer server.Close()
+	response, err := server.Client().Get(server.URL + callbackPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusMethodNotAllowed ||
+		response.Header.Get("Allow") != http.MethodPost ||
+		len(body) != 0 {
+		t.Fatalf("status=%d allow=%q body=%q", response.StatusCode, response.Header.Get("Allow"), body)
+	}
+}
+
+func TestHandlerRejectsOversizedRequest(t *testing.T) {
+	server := httptest.NewServer(newHandler("secret", map[string]Tool{}))
+	defer server.Close()
+	body := `{"toolName":"lookup","args":{"value":"` + strings.Repeat("x", maxRequestBytes) + `"}}`
+	request, err := http.NewRequest(http.MethodPost, server.URL+callbackPath, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d", response.StatusCode)
 	}
 }
@@ -88,6 +129,32 @@ func TestHandlerExecutesAndWrapsTools(t *testing.T) {
 				t.Fatalf("result = %#v, want %#v", got.Result, test.want)
 			}
 		})
+	}
+}
+
+func TestExecuteRejectsOversizedOutput(t *testing.T) {
+	result := execute(
+		context.Background(),
+		`head -c 4194305 /dev/zero`,
+		"large",
+		"",
+		"",
+		map[string]any{},
+	)
+	if result["error"] != "tool output too large" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestCloseSurfacesServeFailure(t *testing.T) {
+	server := &Server{
+		server:    &http.Server{},
+		serveDone: make(chan error, 1),
+	}
+	server.serveDone <- errors.New("serve failed")
+	err := server.Close(context.Background())
+	if err == nil || err.Error() != "serve custom tool callbacks: serve failed" {
+		t.Fatalf("Close() error = %v", err)
 	}
 }
 

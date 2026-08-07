@@ -26,15 +26,13 @@ func newAgentPromptCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			allowedJSONFlags := append([]string{"quiet", "detach"}, customToolFlagNames...)
 			composite, raw, err := jsonRequest(
 				app,
 				command,
 				args,
 				jsonValue,
-				"quiet",
-				"detach",
-				"custom-tool",
-				"custom-tool-config",
+				allowedJSONFlags...,
 			)
 			if err != nil {
 				return err

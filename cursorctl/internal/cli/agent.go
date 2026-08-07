@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -42,16 +43,15 @@ func newAgentCreateCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runUnaryCommand(
+			request, err := buildUnaryRequest(
 				app,
 				command,
 				args,
 				jsonValue,
-				"CreateAgent",
 				0,
 				"agent create",
 				true,
-				[]string{"custom-tool", "custom-tool-config"},
+				customToolFlagNames,
 				func(_ []string, apiKey string) (map[string]any, error) {
 					options, err := buildAgentOptions(app, command, &flags, apiKey)
 					if err != nil {
@@ -63,14 +63,21 @@ func newAgentCreateCommand(app *App) *cobra.Command {
 					}
 					return request, nil
 				},
-				func(request map[string]any, run func() error) error {
-					if len(tools.registry) != 0 {
-						if err := injectAgentCustomTools(request, tools.declarations); err != nil {
-							return err
-						}
-					}
-					return withCustomToolServer(app, command, tools, run)
-				},
+			)
+			if err != nil {
+				return err
+			}
+			if len(tools.registry) != 0 {
+				if err := injectAgentCustomTools(request, tools.declarations); err != nil {
+					return err
+				}
+			}
+			return runRPC[map[string]any](
+				app,
+				command,
+				"SdkAgentService",
+				"CreateAgent",
+				request,
 			)
 		},
 	}
@@ -89,17 +96,24 @@ func newAgentResumeCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "ResumeAgent", 1, "agent resume", true, nil,
-				func(args []string, apiKey string) (map[string]any, error) {
-					if command.Flags().Changed("idempotency-key") {
-						return nil, fmt.Errorf("--idempotency-key is not supported by ResumeAgent")
-					}
-					options, err := buildAgentOptions(app, command, &flags, apiKey)
-					if err != nil {
-						return nil, err
-					}
-					return map[string]any{"agentId": args[0], "options": options}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:        "ResumeAgent",
+					argCount:      1,
+					use:           "agent resume",
+					injectOptions: true,
+					build: func(args []string, apiKey string) (map[string]any, error) {
+						if command.Flags().Changed("idempotency-key") {
+							return nil, fmt.Errorf("--idempotency-key is not supported by ResumeAgent")
+						}
+						options, err := buildAgentOptions(app, command, &flags, apiKey)
+						if err != nil {
+							return nil, err
+						}
+						return map[string]any{"agentId": args[0], "options": options}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}
@@ -117,14 +131,21 @@ func newAgentGetCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "GetAgent", 1, "agent get", true, nil,
-				func(args []string, apiKey string) (map[string]any, error) {
-					options := map[string]any{"apiKey": apiKey}
-					if command.Flags().Changed("cwd") {
-						options["cwd"] = cwd
-					}
-					return map[string]any{"agentId": args[0], "options": options}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:        "GetAgent",
+					argCount:      1,
+					use:           "agent get",
+					injectOptions: true,
+					build: func(args []string, apiKey string) (map[string]any, error) {
+						options := map[string]any{"apiKey": apiKey}
+						if command.Flags().Changed("cwd") {
+							options["cwd"] = cwd
+						}
+						return map[string]any{"agentId": args[0], "options": options}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}
@@ -147,29 +168,36 @@ func newAgentListCommand(app *App) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, "ListAgents", 0, "agent list", true, nil,
-				func(_ []string, apiKey string) (map[string]any, error) {
-					options := map[string]any{"apiKey": apiKey}
-					if command.Flags().Changed("limit") {
-						options["limit"] = limit
-					}
-					if command.Flags().Changed("cursor") {
-						options["cursor"] = cursor
-					}
-					if err := setRuntimeOption(command, options, runtime); err != nil {
-						return nil, err
-					}
-					if command.Flags().Changed("cwd") {
-						options["cwd"] = cwd
-					}
-					if command.Flags().Changed("pr-url") {
-						options["prUrl"] = prURL
-					}
-					if command.Flags().Changed("include-archived") {
-						options["includeArchived"] = includeArchived
-					}
-					return map[string]any{"options": options}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:        "ListAgents",
+					argCount:      0,
+					use:           "agent list",
+					injectOptions: true,
+					build: func(_ []string, apiKey string) (map[string]any, error) {
+						options := map[string]any{"apiKey": apiKey}
+						if command.Flags().Changed("limit") {
+							options["limit"] = limit
+						}
+						if command.Flags().Changed("cursor") {
+							options["cursor"] = cursor
+						}
+						if err := setRuntimeOption(command, options, runtime); err != nil {
+							return nil, err
+						}
+						if command.Flags().Changed("cwd") {
+							options["cwd"] = cwd
+						}
+						if command.Flags().Changed("pr-url") {
+							options["prUrl"] = prURL
+						}
+						if command.Flags().Changed("include-archived") {
+							options["includeArchived"] = includeArchived
+						}
+						return map[string]any{"options": options}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}
@@ -195,7 +223,7 @@ func newAgentOperationCommand(
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   name + " <agent-id>",
-		Short: name + " an agent with " + method,
+		Short: strings.ToUpper(name[:1]) + name[1:] + " an agent with " + method,
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if requireForce && !force {
@@ -206,14 +234,21 @@ func newAgentOperationCommand(
 				allowed = []string{"force"}
 			}
 			return runUnaryCommand(
-				app, command, args, jsonValue, method, 1, "agent "+name, true, allowed,
-				func(args []string, apiKey string) (map[string]any, error) {
-					options := map[string]any{"apiKey": apiKey}
-					if command.Flags().Changed("cwd") {
-						options["cwd"] = cwd
-					}
-					return map[string]any{"agentId": args[0], "options": options}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:        method,
+					argCount:      1,
+					use:           "agent " + name,
+					injectOptions: true,
+					build: func(args []string, apiKey string) (map[string]any, error) {
+						options := map[string]any{"apiKey": apiKey}
+						if command.Flags().Changed("cwd") {
+							options["cwd"] = cwd
+						}
+						return map[string]any{"agentId": args[0], "options": options}, nil
+					},
 				},
+				allowed,
 			)
 		},
 	}
@@ -229,14 +264,20 @@ func newAgentSimpleCommand(app *App, name string, method string) *cobra.Command 
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   name + " <agent-id>",
-		Short: name + " an agent with " + method,
+		Short: strings.ToUpper(name[:1]) + name[1:] + " an agent with " + method,
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
-				app, command, args, jsonValue, method, 1, "agent "+name, false, nil,
-				func(args []string, _ string) (map[string]any, error) {
-					return map[string]any{"agentId": args[0]}, nil
+				app, command, args, jsonValue,
+				unaryCommandSpec{
+					method:   method,
+					argCount: 1,
+					use:      "agent " + name,
+					build: func(args []string, _ string) (map[string]any, error) {
+						return map[string]any{"agentId": args[0]}, nil
+					},
 				},
+				nil,
 			)
 		},
 	}
