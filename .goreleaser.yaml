@@ -1,0 +1,41 @@
+version: 2
+
+builds:
+  - id: cursorctl
+    binary: cursorctl
+    dir: cursorctl
+    main: .
+    env:
+      - CGO_ENABLED=0
+    # Windows is intentionally excluded: the SDK Bridge dependency does not support it.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/nickmisasi/cursor-utils/cursorctl/internal/cli.Version={{.Version}}
+
+archives:
+  - id: cursorctl
+    formats:
+      - tar.gz
+    name_template: "cursorctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: LICENSE*
+      - src: cursorctl/README.md
+        dst: README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
+  filters:
+    exclude:
+      - "^Merge "
+
+release:
+  draft: false
+  prerelease: auto
