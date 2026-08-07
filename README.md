@@ -6,11 +6,29 @@ Utilities for building and automating Cursor workflows.
 
 [`cursorctl`](cursorctl/) is a Go command-line client for the [Cursor SDK Bridge](docs/sdk-bridge-protocol.md). It lets scripts and coding agents create local or cloud Cursor agents, send work, detach from long-running cloud delegation, inspect runs, retrieve conversations and artifacts, and manage agent lifecycle.
 
-Install the latest module:
+### Install from release
+
+Download the tarball for your platform from [GitHub Releases](https://github.com/nickmisasi/cursor-utils/releases). For Linux on amd64:
+
+```bash
+VERSION=v1.0.0
+tmp="$(mktemp -d)"
+curl -fL "https://github.com/nickmisasi/cursor-utils/releases/download/${VERSION}/cursorctl_${VERSION#v}_linux_amd64.tar.gz" |
+  tar -xz -C "$tmp"
+sudo install -m 0755 "$tmp/cursorctl" /usr/local/bin/cursorctl
+rm -rf "$tmp"
+cursorctl version
+```
+
+### Install with Go
+
+Install the latest module as an alternative:
 
 ```bash
 go install github.com/nickmisasi/cursor-utils/cursorctl@latest
 ```
+
+### Build from source
 
 Or build this checkout:
 

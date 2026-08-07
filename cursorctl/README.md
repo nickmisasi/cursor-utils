@@ -6,11 +6,29 @@ The CLI pins SDK Bridge `v1.0.27`. It downloads the standalone binary on first b
 
 ## Build and install
 
-Install from the module:
+### Install from release
+
+Download the tarball for your platform from [GitHub Releases](https://github.com/nickmisasi/cursor-utils/releases). For Linux on amd64:
+
+```bash
+VERSION=v1.0.0
+tmp="$(mktemp -d)"
+curl -fL "https://github.com/nickmisasi/cursor-utils/releases/download/${VERSION}/cursorctl_${VERSION#v}_linux_amd64.tar.gz" |
+  tar -xz -C "$tmp"
+sudo install -m 0755 "$tmp/cursorctl" /usr/local/bin/cursorctl
+rm -rf "$tmp"
+cursorctl version
+```
+
+### Install with Go
+
+Install from the module as an alternative:
 
 ```bash
 go install github.com/nickmisasi/cursor-utils/cursorctl@latest
 ```
+
+### Build from source
 
 Build from this directory:
 
