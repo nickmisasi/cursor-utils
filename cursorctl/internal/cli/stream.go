@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/nickmisasi/cursor-utils/cursorctl/internal/bridge"
+	"github.com/spf13/cobra"
 )
 
 type streamOutputOptions struct {
@@ -20,7 +21,7 @@ func consumeRunStream(
 	app *App,
 	reader *bridge.StreamReader,
 	options streamOutputOptions,
-) (map[string]any, error) {
+) error {
 	defer reader.Close()
 	encoder := json.NewEncoder(app.Out)
 	var finalResult map[string]any
@@ -33,32 +34,34 @@ func consumeRunStream(
 		}
 		if err != nil {
 			if errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil, fmt.Errorf("run stream ended unexpectedly: %w", err)
+				return fmt.Errorf("run stream ended unexpectedly: %w", err)
 			}
-			return nil, err
+			return err
 		}
 
 		eventName, payload, ok, err := decodeStreamEnvelope(message)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !ok {
 			continue
 		}
 		if eventName == "result" {
+			// proto/sdk/v1/sdk_messages.proto nests RunStreamResult.result.
 			value, exists := payload["result"].(map[string]any)
 			if !exists {
-				return nil, fmt.Errorf("run result envelope is missing result")
+				return fmt.Errorf("run result envelope is missing result")
 			}
 			finalResult = value
 		}
 
 		if options.detach {
-			if runID := findRunID(payload); runID != "" {
-				return nil, app.Print(map[string]any{
-					"agentId": options.agentID,
-					"runId":   runID,
-				})
+			if runID := streamRunID(eventName, payload); runID != "" {
+				output := map[string]any{"runId": runID}
+				if options.agentID != "" {
+					output["agentId"] = options.agentID
+				}
+				return app.Print(output)
 			}
 			continue
 		}
@@ -70,28 +73,28 @@ func consumeRunStream(
 			if rawOffset, exists := message["offset"]; exists {
 				var offset string
 				if err := json.Unmarshal(rawOffset, &offset); err != nil {
-					return nil, fmt.Errorf("decode stream offset: %w", err)
+					return fmt.Errorf("decode stream offset: %w", err)
 				}
 				output["offset"] = offset
 			}
 			if err := encoder.Encode(output); err != nil {
-				return nil, fmt.Errorf("write stream event: %w", err)
+				return fmt.Errorf("write stream event: %w", err)
 			}
 		}
 	}
 
 	if options.detach {
-		return nil, fmt.Errorf("run stream ended before reporting a run ID")
+		return fmt.Errorf("run stream ended before reporting a run ID")
 	}
 	if finalResult == nil {
-		return nil, fmt.Errorf("run stream ended without a result")
+		return fmt.Errorf("run stream ended without a result")
 	}
 	if options.quiet {
 		if err := app.Print(finalResult); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return finalResult, runResultError(finalResult)
+	return runResultError(finalResult)
 }
 
 func decodeStreamEnvelope(
@@ -112,31 +115,52 @@ func decodeStreamEnvelope(
 	return "", nil, false, nil
 }
 
-func findRunID(value any) string {
-	switch value := value.(type) {
-	case map[string]any:
-		if runID, ok := value["runId"].(string); ok && runID != "" {
-			return runID
+func streamRunID(eventName string, payload map[string]any) string {
+	switch eventName {
+	case "sdkMessage":
+		if payload["type"] != "system" {
+			return ""
 		}
-		if runID, ok := value["run_id"].(string); ok && runID != "" {
-			return runID
+		message, ok := payload["message"].(map[string]any)
+		if !ok || message["subtype"] != "init" {
+			return ""
 		}
-		for _, item := range value {
-			if runID := findRunID(item); runID != "" {
-				return runID
-			}
-		}
-	case []any:
-		for _, item := range value {
-			if runID := findRunID(item); runID != "" {
-				return runID
-			}
-		}
-	case nil, bool, string, float64:
+		runID, _ := message["runId"].(string)
+		return runID
+	case "result", "done":
+		runID, _ := payload["runId"].(string)
+		return runID
+	case "interactionUpdate", "step":
+		return ""
 	default:
 		return ""
 	}
-	return ""
+}
+
+func runStreamRPC(
+	app *App,
+	command *cobra.Command,
+	method string,
+	request map[string]any,
+	options streamOutputOptions,
+) error {
+	if err := prepareCommand(app, command); err != nil {
+		return err
+	}
+	client, err := app.Client(command.Context())
+	if err != nil {
+		return err
+	}
+	reader, err := client.Stream(
+		command.Context(),
+		"SdkAgentService",
+		method,
+		request,
+	)
+	if err != nil {
+		return err
+	}
+	return consumeRunStream(app, reader, options)
 }
 
 func runResultError(result map[string]any) error {

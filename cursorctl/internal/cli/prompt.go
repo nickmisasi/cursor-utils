@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"time"
 
+	"github.com/nickmisasi/cursor-utils/cursorctl/internal/bridge"
 	"github.com/spf13/cobra"
 )
 
@@ -18,15 +21,7 @@ func newAgentPromptCommand(app *App) *cobra.Command {
 			if err := validateStreamOutputFlags(streamFlags.quiet, streamFlags.detach); err != nil {
 				return err
 			}
-			conflicts := append([]string{}, agentOptionRequestFlags...)
-			conflicts = append(conflicts, sendRequestFlags...)
-			composite, raw, err := jsonRequest(
-				app,
-				command,
-				args,
-				jsonValue,
-				conflicts...,
-			)
+			composite, raw, err := jsonRequest(app, command, args, jsonValue, "quiet", "detach")
 			if err != nil {
 				return err
 			}
@@ -46,15 +41,18 @@ func newAgentPromptCommand(app *App) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				streamFlags.model = agentFlags.model
-				streamFlags.mode = agentFlags.mode
-				streamFlags.mcpConfig = agentFlags.mcpConfig
-				streamFlags.idempotencyKey = agentFlags.idempotencyKey
 				message, err := buildUserMessage(app, command, args, &streamFlags)
 				if err != nil {
 					return err
 				}
-				sendOptions, err := buildSendOptions(app, command, &streamFlags)
+				sendOptions, err := buildSendOptions(
+					app,
+					command,
+					&streamFlags,
+					agentFlags.model,
+					agentFlags.mode,
+					agentFlags.mcpConfig,
+				)
 				if err != nil {
 					return err
 				}
@@ -63,13 +61,21 @@ func newAgentPromptCommand(app *App) *cobra.Command {
 					"message":     message,
 					"sendOptions": sendOptions,
 				}
+				if command.Flags().Changed("idempotency-key") {
+					composite["idempotencyKey"] = agentFlags.idempotencyKey
+				}
 			}
-			return runPrompt(app, command, composite, agentFlags.idempotencyKey, streamFlags)
+			return runPrompt(app, command, composite, streamFlags)
 		},
 	}
 	addAgentOptionFlags(command, &agentFlags)
-	addSendFlags(command, &streamFlags, true)
-	addJSONFlag(command, &jsonValue)
+	addSendFlags(command, &streamFlags)
+	command.Flags().StringVar(
+		&jsonValue,
+		"json",
+		"",
+		`Composite JSON {options, message, sendOptions, idempotencyKey?}, @file, or -`,
+	)
 	return command
 }
 
@@ -77,7 +83,6 @@ func runPrompt(
 	app *App,
 	command *cobra.Command,
 	composite map[string]any,
-	idempotencyKey string,
 	flags sendFlags,
 ) error {
 	if err := prepareCommand(app, command); err != nil {
@@ -96,7 +101,8 @@ func runPrompt(
 		return fmt.Errorf("prompt message must be a JSON object")
 	}
 	createRequest := map[string]any{"options": options}
-	if command.Flags().Changed("idempotency-key") {
+	idempotencyKey, hasIdempotencyKey := composite["idempotencyKey"]
+	if hasIdempotencyKey {
 		createRequest["idempotencyKey"] = idempotencyKey
 	}
 	var createResponse map[string]any
@@ -128,7 +134,7 @@ func runPrompt(
 			sendRequest["options"] = options
 		}
 	}
-	if command.Flags().Changed("idempotency-key") {
+	if hasIdempotencyKey {
 		sendRequest["idempotencyKey"] = idempotencyKey
 	}
 
@@ -139,7 +145,7 @@ func runPrompt(
 		sendRequest,
 	)
 	if streamErr == nil {
-		_, streamErr = consumeRunStream(
+		streamErr = consumeRunStream(
 			app,
 			reader,
 			streamOutputOptions{quiet: flags.quiet, detach: flags.detach, agentID: agentID},
@@ -153,4 +159,17 @@ func runPrompt(
 		return fmt.Errorf("close prompt agent: %w", closeErr)
 	}
 	return nil
+}
+
+func closeAgent(client *bridge.Client, agentID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var response map[string]any
+	return client.Call(
+		ctx,
+		"SdkAgentService",
+		"CloseAgent",
+		map[string]any{"agentId": agentID},
+		&response,
+	)
 }

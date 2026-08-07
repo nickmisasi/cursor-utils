@@ -1,49 +1,46 @@
 package cli
 
 import (
-	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"time"
 
-	"github.com/nickmisasi/cursor-utils/cursorctl/internal/bridge"
 	"github.com/spf13/cobra"
 )
 
-type sendFlags struct {
+type sharedSendFlags struct {
 	model          string
 	mode           string
 	mcpConfig      string
-	force          bool
-	envVars        []string
-	deltas         bool
-	steps          bool
 	idempotencyKey string
-	messageFile    string
-	images         []string
-	quiet          bool
-	detach         bool
 }
 
-var sendRequestFlags = []string{
-	"message-file", "image", "model", "mode", "mcp-config", "force",
-	"send-env-var", "deltas", "steps", "idempotency-key",
+type sendFlags struct {
+	force       bool
+	envVars     []string
+	deltas      bool
+	steps       bool
+	messageFile string
+	images      []string
+	quiet       bool
+	detach      bool
 }
 
-func addSendFlags(command *cobra.Command, flags *sendFlags, shared bool) {
+func addSharedSendFlags(command *cobra.Command, flags *sharedSendFlags) {
+	set := command.Flags()
+	set.StringVar(&flags.model, "model", "", "Model identifier for this send")
+	set.StringVar(&flags.mode, "mode", "", "Conversation mode: agent or plan")
+	set.StringVar(&flags.mcpConfig, "mcp-config", "", "MCP server map as JSON, @file, or -")
+	set.StringVar(&flags.idempotencyKey, "idempotency-key", "", "Idempotency key for this send")
+}
+
+func addSendFlags(command *cobra.Command, flags *sendFlags) {
 	set := command.Flags()
 	set.StringVar(&flags.messageFile, "message-file", "", "Read message text from a file or - for stdin")
 	set.StringArrayVar(&flags.images, "image", nil, "Image path or http(s) URL (repeatable)")
-	if !shared {
-		set.StringVar(&flags.model, "model", "", "Model identifier for this send")
-		set.StringVar(&flags.mode, "mode", "", "Conversation mode: agent or plan")
-		set.StringVar(&flags.mcpConfig, "mcp-config", "", "MCP server map as JSON, @file, or -")
-		set.StringVar(&flags.idempotencyKey, "idempotency-key", "", "Idempotency key for this send")
-	}
 	set.BoolVar(&flags.force, "force", false, "Force a local send")
 	set.StringArrayVar(&flags.envVars, "send-env-var", nil, "Run-scoped cloud environment KEY=VAL (repeatable)")
 	set.BoolVar(&flags.deltas, "deltas", false, "Stream interaction update events")
@@ -58,6 +55,7 @@ func addSendFlags(command *cobra.Command, flags *sendFlags, shared bool) {
 }
 
 func newAgentSendCommand(app *App) *cobra.Command {
+	var shared sharedSendFlags
 	var flags sendFlags
 	var jsonValue string
 	command := &cobra.Command{
@@ -68,13 +66,7 @@ func newAgentSendCommand(app *App) *cobra.Command {
 			if err := validateStreamOutputFlags(flags.quiet, flags.detach); err != nil {
 				return err
 			}
-			request, raw, err := jsonRequest(
-				app,
-				command,
-				args,
-				jsonValue,
-				sendRequestFlags...,
-			)
+			request, raw, err := jsonRequest(app, command, args, jsonValue, "quiet", "detach")
 			if err != nil {
 				return err
 			}
@@ -82,7 +74,7 @@ func newAgentSendCommand(app *App) *cobra.Command {
 				if len(args) < 1 || len(args) > 2 {
 					return fmt.Errorf("agent send requires an agent ID and optional message text")
 				}
-				request, err = buildSendRequest(app, command, args[0], args[1:], &flags)
+				request, err = buildSendRequest(app, command, args[0], args[1:], &flags, &shared)
 				if err != nil {
 					return err
 				}
@@ -97,7 +89,8 @@ func newAgentSendCommand(app *App) *cobra.Command {
 			)
 		},
 	}
-	addSendFlags(command, &flags, false)
+	addSharedSendFlags(command, &shared)
+	addSendFlags(command, &flags)
 	addJSONFlag(command, &jsonValue)
 	return command
 }
@@ -108,6 +101,7 @@ func buildSendRequest(
 	agentID string,
 	textArgs []string,
 	flags *sendFlags,
+	shared *sharedSendFlags,
 ) (map[string]any, error) {
 	message, err := buildUserMessage(app, command, textArgs, flags)
 	if err != nil {
@@ -117,7 +111,14 @@ func buildSendRequest(
 		"agentId": agentID,
 		"message": message,
 	}
-	options, err := buildSendOptions(app, command, flags)
+	options, err := buildSendOptions(
+		app,
+		command,
+		flags,
+		shared.model,
+		shared.mode,
+		shared.mcpConfig,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +126,7 @@ func buildSendRequest(
 		request["options"] = options
 	}
 	if command.Flags().Changed("idempotency-key") {
-		request["idempotencyKey"] = flags.idempotencyKey
+		request["idempotencyKey"] = shared.idempotencyKey
 	}
 	return request, nil
 }
@@ -175,20 +176,24 @@ func buildSendOptions(
 	app *App,
 	command *cobra.Command,
 	flags *sendFlags,
+	model string,
+	modeValue string,
+	mcpConfig string,
 ) (map[string]any, error) {
 	options := map[string]any{}
 	if command.Flags().Changed("model") {
-		options["model"] = map[string]any{"id": flags.model}
+		options["model"] = map[string]any{"id": model}
 	}
 	if command.Flags().Changed("mode") {
-		mode, err := prefixedEnum(flags.mode, "AGENT_MODE_OPTION_", "AGENT", "PLAN")
+		// proto/sdk/v1/sdk_messages.proto defines AGENT_MODE_OPTION_* literals.
+		mode, err := prefixedEnum(modeValue, "AGENT_MODE_OPTION_", "AGENT", "PLAN")
 		if err != nil {
 			return nil, err
 		}
 		options["mode"] = mode
 	}
 	if command.Flags().Changed("mcp-config") {
-		config, err := app.ReadJSONPayload(flags.mcpConfig)
+		config, err := app.ReadJSONPayload(mcpConfig)
 		if err != nil {
 			return nil, fmt.Errorf("read --mcp-config: %w", err)
 		}
@@ -211,33 +216,6 @@ func buildSendOptions(
 		options["enableSteps"] = flags.steps
 	}
 	return options, nil
-}
-
-func runStreamRPC(
-	app *App,
-	command *cobra.Command,
-	method string,
-	request map[string]any,
-	options streamOutputOptions,
-) error {
-	if err := prepareCommand(app, command); err != nil {
-		return err
-	}
-	client, err := app.Client(command.Context())
-	if err != nil {
-		return err
-	}
-	reader, err := client.Stream(
-		command.Context(),
-		"SdkAgentService",
-		method,
-		request,
-	)
-	if err != nil {
-		return err
-	}
-	_, err = consumeRunStream(app, reader, options)
-	return err
 }
 
 func readInputFile(app *App, path string) ([]byte, error) {
@@ -277,17 +255,4 @@ func validateStreamOutputFlags(quiet bool, detach bool) error {
 		return fmt.Errorf("cannot combine --quiet with --detach")
 	}
 	return nil
-}
-
-func closeAgent(client *bridge.Client, agentID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	var response map[string]any
-	return client.Call(
-		ctx,
-		"SdkAgentService",
-		"CloseAgent",
-		map[string]any{"agentId": agentID},
-		&response,
-	)
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func addJSONFlag(command *cobra.Command, target *string) {
@@ -16,7 +17,7 @@ func jsonRequest(
 	command *cobra.Command,
 	args []string,
 	value string,
-	requestFlags ...string,
+	allowedFlags ...string,
 ) (map[string]any, bool, error) {
 	if !command.Flags().Changed("json") {
 		return nil, false, nil
@@ -24,13 +25,92 @@ func jsonRequest(
 	if len(args) != 0 {
 		return nil, true, fmt.Errorf("cannot combine --json with positional arguments")
 	}
-	for _, name := range requestFlags {
-		if command.Flags().Changed(name) {
-			return nil, true, fmt.Errorf("cannot combine --json with --%s", name)
+	allowed := map[string]bool{"json": true}
+	for _, name := range allowedFlags {
+		allowed[name] = true
+	}
+	var conflict string
+	command.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) {
+		if conflict == "" && flag.Changed && !allowed[flag.Name] {
+			conflict = flag.Name
 		}
+	})
+	if conflict != "" {
+		return nil, true, fmt.Errorf("cannot combine --json with --%s", conflict)
 	}
 	request, err := app.ReadJSONPayload(value)
 	return request, true, err
+}
+
+type unaryRequestBuilder func(args []string, apiKey string) (map[string]any, error)
+
+func runUnaryCommand(
+	app *App,
+	command *cobra.Command,
+	args []string,
+	jsonValue string,
+	method string,
+	argCount int,
+	usage string,
+	injectOptions bool,
+	allowedJSONFlags []string,
+	build unaryRequestBuilder,
+) error {
+	request, err := buildUnaryRequest(
+		app,
+		command,
+		args,
+		jsonValue,
+		argCount,
+		usage,
+		injectOptions,
+		allowedJSONFlags,
+		build,
+	)
+	if err != nil {
+		return err
+	}
+	return runRPC[map[string]any](app, command, "SdkAgentService", method, request)
+}
+
+func buildUnaryRequest(
+	app *App,
+	command *cobra.Command,
+	args []string,
+	jsonValue string,
+	argCount int,
+	usage string,
+	injectOptions bool,
+	allowedJSONFlags []string,
+	build unaryRequestBuilder,
+) (map[string]any, error) {
+	request, raw, err := jsonRequest(app, command, args, jsonValue, allowedJSONFlags...)
+	if err != nil {
+		return nil, err
+	}
+	var apiKey string
+	if injectOptions {
+		apiKey, err = app.ResolvedAPIKey()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if raw {
+		if injectOptions {
+			if err := injectAPIKey(request, "options", apiKey); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		if err := requireArgs(args, argCount, usage); err != nil {
+			return nil, err
+		}
+		request, err = build(args, apiKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return request, nil
 }
 
 func injectAPIKey(request map[string]any, field string, apiKey string) error {
@@ -96,6 +176,18 @@ func prefixedEnum(value string, prefix string, allowed ...string) (string, error
 		return "", err
 	}
 	return prefix + normalized, nil
+}
+
+func setRuntimeOption(command *cobra.Command, options map[string]any, value string) error {
+	if !command.Flags().Changed("runtime") {
+		return nil
+	}
+	runtime, err := prefixedEnum(value, "RUNTIME_", "LOCAL", "CLOUD")
+	if err != nil {
+		return err
+	}
+	options["runtime"] = runtime
+	return nil
 }
 
 func requireArgs(args []string, count int, usage string) error {

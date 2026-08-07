@@ -7,11 +7,9 @@ import (
 )
 
 type agentOptionFlags struct {
-	model               string
+	sharedSendFlags
 	name                string
 	agentID             string
-	mode                string
-	idempotencyKey      string
 	cwd                 string
 	dirs                []string
 	settingSources      []string
@@ -27,18 +25,9 @@ type agentOptionFlags struct {
 	envVars             []string
 	metadata            []string
 	openAsGitHubApp     bool
-	mcpConfig           string
 	agentsConfig        string
 	tools               []string
 	disallowedTools     []string
-}
-
-var agentOptionRequestFlags = []string{
-	"model", "name", "agent-id", "mode", "idempotency-key", "cwd", "dir",
-	"setting-source", "sandbox", "auto-review", "repo", "pr-url", "env-type",
-	"env-name", "auto-create-pr", "skip-reviewer-request",
-	"work-on-current-branch", "env-var", "metadata", "open-as-github-app",
-	"mcp-config", "agents-config", "tool", "disallowed-tool",
 }
 
 var localAgentFlagNames = []string{
@@ -102,6 +91,7 @@ func buildAgentOptions(
 		options["agentId"] = flags.agentID
 	}
 	if command.Flags().Changed("mode") {
+		// proto/sdk/v1/sdk_messages.proto defines AGENT_MODE_OPTION_* literals.
 		mode, err := prefixedEnum(flags.mode, "AGENT_MODE_OPTION_", "AGENT", "PLAN")
 		if err != nil {
 			return nil, err
@@ -215,6 +205,7 @@ func buildCloudAgentOptions(
 	if command.Flags().Changed("env-type") || command.Flags().Changed("env-name") {
 		env := map[string]any{}
 		if command.Flags().Changed("env-type") {
+			// proto/sdk/v1/sdk_messages.proto defines CLOUD_ENVIRONMENT_TYPE_* literals.
 			value, err := prefixedEnum(
 				flags.envType,
 				"CLOUD_ENVIRONMENT_TYPE_",
