@@ -9,7 +9,8 @@ import (
 )
 
 func TestReadJSONPayloadRaw(t *testing.T) {
-	payload, err := ReadJSONPayload(`{"name":"Ada","count":2}`)
+	app := &App{In: strings.NewReader("")}
+	payload, err := app.ReadJSONPayload(`{"name":"Ada","count":2}`)
 	if err != nil {
 		t.Fatalf("ReadJSONPayload() error = %v", err)
 	}
@@ -23,7 +24,8 @@ func TestReadJSONPayloadFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"source":"file"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := ReadJSONPayload("@" + path)
+	app := &App{In: strings.NewReader("")}
+	payload, err := app.ReadJSONPayload("@" + path)
 	if err != nil {
 		t.Fatalf("ReadJSONPayload() error = %v", err)
 	}
@@ -33,7 +35,8 @@ func TestReadJSONPayloadFile(t *testing.T) {
 }
 
 func TestReadJSONPayloadStdin(t *testing.T) {
-	payload, err := readJSONPayload("-", strings.NewReader(`{"source":"stdin"}`))
+	app := &App{In: strings.NewReader(`{"source":"stdin"}`)}
+	payload, err := app.ReadJSONPayload("-")
 	if err != nil {
 		t.Fatalf("readJSONPayload() error = %v", err)
 	}
@@ -55,7 +58,8 @@ func TestReadJSONPayloadErrors(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := ReadJSONPayload(test.value); err == nil {
+			app := &App{In: strings.NewReader("")}
+			if _, err := app.ReadJSONPayload(test.value); err == nil {
 				t.Fatalf("ReadJSONPayload(%q) error = nil", test.value)
 			}
 		})

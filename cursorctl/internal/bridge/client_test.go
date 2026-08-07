@@ -62,8 +62,34 @@ func TestClientCallConnectError(t *testing.T) {
 	if !errors.As(err, &rpcError) {
 		t.Fatalf("Call() error = %T %v, want *RPCError", err, err)
 	}
-	if rpcError.Code != "invalid_argument" || rpcError.Message != "bad request" || len(rpcError.Details) != 1 {
+	if rpcError.Code != "invalid_argument" ||
+		rpcError.Message != "bad request" ||
+		rpcError.HTTPStatus != http.StatusBadRequest ||
+		len(rpcError.Details) != 1 {
 		t.Fatalf("RPCError = %#v", rpcError)
+	}
+}
+
+func TestClientCallInvalidErrorBodyCarriesHTTPStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+		io.WriteString(writer, "not JSON")
+	}))
+	defer server.Close()
+
+	err := NewClient(server.URL, "secret", server.Client()).Call(
+		context.Background(),
+		"Service",
+		"Method",
+		map[string]any{},
+		&map[string]any{},
+	)
+	var rpcError *RPCError
+	if !errors.As(err, &rpcError) {
+		t.Fatalf("Call() error = %T %v, want *RPCError", err, err)
+	}
+	if rpcError.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("HTTPStatus = %d, want %d", rpcError.HTTPStatus, http.StatusServiceUnavailable)
 	}
 }
 
@@ -129,6 +155,36 @@ func TestClientStreamEndError(t *testing.T) {
 	}
 	if rpcError.Code != "unavailable" || rpcError.Message != "try again" {
 		t.Fatalf("RPCError = %#v", rpcError)
+	}
+}
+
+func TestClientStreamCloseWithoutEndStream(t *testing.T) {
+	server := streamServer(t, func(writer io.Writer) {
+		mustWriteFrame(t, writer, 0x00, `{"sequence":1}`)
+	})
+	defer server.Close()
+
+	reader, err := NewClient(server.URL, "secret", server.Client()).Stream(
+		context.Background(),
+		"Service",
+		"Method",
+		map[string]any{},
+	)
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer reader.Close()
+
+	var message map[string]any
+	if err := reader.Next(&message); err != nil {
+		t.Fatalf("first Next() error = %v", err)
+	}
+	err = reader.Next(&message)
+	if err == io.EOF {
+		t.Fatal("Next() error = clean EOF without EndStream frame")
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("Next() error = %v, want wrapped io.ErrUnexpectedEOF", err)
 	}
 }
 

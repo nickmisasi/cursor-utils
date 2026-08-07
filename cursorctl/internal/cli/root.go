@@ -41,12 +41,7 @@ func NewRootCommand() (*cobra.Command, *App) {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRunE: func(command *cobra.Command, _ []string) error {
-			ctx, err := app.prepareContext(command.Context())
-			if err != nil {
-				return err
-			}
-			command.SetContext(ctx)
-			return nil
+			return prepareCommand(app, command)
 		},
 	}
 	root.SetIn(app.In)
@@ -60,9 +55,23 @@ func NewRootCommand() (*cobra.Command, *App) {
 	flags.StringVar(&app.Workspace, "workspace", workspace, "Workspace passed to the SDK bridge")
 	flags.StringVar(&app.BridgeBin, "bridge-bin", "", "Path to the SDK bridge binary")
 	flags.StringVar(&app.BridgeVersion, "bridge-version", bridge.DefaultVersion, "SDK bridge release version")
-	flags.DurationVar(&app.Timeout, "timeout", 0, "Invocation timeout (0 disables the deadline)")
+	flags.DurationVar(
+		&app.Timeout,
+		"timeout",
+		0,
+		"Invocation timeout, including bridge downloads (0 disables the deadline)",
+	)
 	flags.BoolVarP(&app.Verbose, "verbose", "v", false, "Show SDK bridge diagnostics")
 
 	root.AddCommand(newBridgeCommand(app))
 	return root, app
+}
+
+func prepareCommand(app *App, command *cobra.Command) error {
+	ctx, err := app.prepareContext(command.Context())
+	if err != nil {
+		return err
+	}
+	command.SetContext(ctx)
+	return nil
 }

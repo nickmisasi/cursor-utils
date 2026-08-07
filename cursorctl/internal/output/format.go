@@ -33,15 +33,6 @@ func ParseFormat(value string) (Format, error) {
 }
 
 func Print(w io.Writer, format Format, value any) error {
-	if format == FormatTOON {
-		data, err := MarshalTOON(value)
-		if err != nil {
-			return err
-		}
-		_, err = w.Write(data)
-		return err
-	}
-
 	normalized, err := normalize(value)
 	if err != nil {
 		return err
@@ -58,7 +49,13 @@ func Print(w io.Writer, format Format, value any) error {
 		defer encoder.Close()
 		return encoder.Encode(yamlValue(normalized))
 	case FormatTOON:
-		panic("TOON handled before normalization")
+		data, err := marshalTOONNormalized(normalized)
+		if err != nil {
+			return err
+		}
+		data = append(data, '\n')
+		_, err = w.Write(data)
+		return err
 	default:
 		return fmt.Errorf("unsupported output format %q", format)
 	}

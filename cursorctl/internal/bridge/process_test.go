@@ -1,8 +1,21 @@
 package bridge
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestParseHandshake(t *testing.T) {
@@ -93,4 +106,170 @@ func TestProcessEnvironmentOverridesCursorValues(t *testing.T) {
 	if apiKey != 1 || language != 1 {
 		t.Fatalf("api key entries = %d, language entries = %d", apiKey, language)
 	}
+}
+
+func TestBridgeLifecycleWithFakeProcess(t *testing.T) {
+	tempDir := t.TempDir()
+	tokenPath := filepath.Join(tempDir, "token")
+	pidPath := filepath.Join(tempDir, "pid")
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/sdk.v1.SdkBridgeControlService/Shutdown" {
+			t.Errorf("unexpected RPC path %q", request.URL.Path)
+		}
+		data, err := os.ReadFile(pidPath)
+		if err != nil {
+			t.Errorf("read fake bridge PID: %v", err)
+		} else {
+			pid, conversionErr := strconv.Atoi(strings.TrimSpace(string(data)))
+			if conversionErr != nil {
+				t.Errorf("parse fake bridge PID: %v", conversionErr)
+			} else if signalErr := syscall.Kill(pid, syscall.SIGTERM); signalErr != nil {
+				t.Errorf("terminate fake bridge: %v", signalErr)
+			}
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		io.WriteString(writer, `{}`)
+	}))
+	defer server.Close()
+
+	handshake, err := json.Marshal(Handshake{
+		SchemaVersion: 1,
+		Transport:     "tcp",
+		Protocol:      "connect",
+		URL:           server.URL,
+		AuthTokenFile: tokenPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+trap 'exit 0' TERM
+printf 'token\n' > %s
+printf '%%s\n' "$$" > %s
+printf 'cursor-sdk-bridge ready %%s\n' %s >&2
+printf 'verbose-after-ready\n' >&2
+while true; do sleep 0.05; done
+`, shellQuote(tokenPath), shellQuote(pidPath), shellQuote(string(handshake)))
+	scriptPath := writeExecutable(t, tempDir, "fake-bridge", script)
+
+	var logs lockedBuffer
+	instance, err := Start(context.Background(), Options{
+		BinaryPath: scriptPath,
+		Workspace:  tempDir,
+		APIKey:     "dummy",
+		LogWriter:  &logs,
+		HTTPClient: server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForString(t, &logs, "verbose-after-ready")
+	if err := instance.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if strings.Contains(logs.String(), readyPrefix) {
+		t.Fatalf("verbose logs exposed ready handshake: %q", logs.String())
+	}
+	if instance.command.ProcessState == nil || !instance.command.ProcessState.Exited() {
+		t.Fatalf("fake bridge process state = %#v", instance.command.ProcessState)
+	}
+}
+
+func TestBridgeStartupErrorIncludesStderr(t *testing.T) {
+	tempDir := t.TempDir()
+	scriptPath := writeExecutable(t, tempDir, "bad-bridge", `#!/bin/sh
+printf 'fatal startup detail\n' >&2
+exit 7
+`)
+	_, err := Start(context.Background(), Options{
+		BinaryPath: scriptPath,
+		Workspace:  tempDir,
+		APIKey:     "dummy",
+	})
+	if err == nil || !strings.Contains(err.Error(), "fatal startup detail") {
+		t.Fatalf("Start() error = %v", err)
+	}
+}
+
+func TestScanBridgeStderrDrainsAfterOversizedLine(t *testing.T) {
+	reader, writer := io.Pipe()
+	ready := make(chan handshakeResult, 1)
+	scanDone := make(chan struct{})
+	go func() {
+		scanBridgeStderr(reader, nil, ready)
+		close(scanDone)
+	}()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(
+			writer,
+			strings.Repeat("x", maxReadyLineSize+1)+"\n"+strings.Repeat("y", maxReadyLineSize+1),
+		)
+		if closeErr := writer.Close(); err == nil {
+			err = closeErr
+		}
+		writeDone <- err
+	}()
+
+	result := <-ready
+	if result.err == nil || !strings.Contains(result.err.Error(), "exceeds") {
+		t.Fatalf("scanBridgeStderr() error = %v", result.err)
+	}
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write stderr: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stderr writer blocked; reader did not continue draining")
+	}
+	select {
+	case <-scanDone:
+	case <-time.After(time.Second):
+		t.Fatal("stderr scanner did not finish after EOF")
+	}
+}
+
+func writeExecutable(t *testing.T, directory, name, contents string) string {
+	t.Helper()
+	path := filepath.Join(directory, name)
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(data)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}
+
+func waitForString(t *testing.T, buffer *lockedBuffer, value string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(buffer.String(), value) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("log output %q does not contain %q", buffer.String(), value)
 }

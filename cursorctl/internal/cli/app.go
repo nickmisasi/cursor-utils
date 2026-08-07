@@ -36,11 +36,18 @@ type App struct {
 	format output.Format
 	cancel context.CancelFunc
 
-	mu     sync.Mutex
-	bridge *bridge.Bridge
+	mu              sync.Mutex
+	bridge          *bridge.Bridge
+	prepared        bool
+	preparedContext context.Context
 }
 
 func (a *App) prepareContext(ctx context.Context) (context.Context, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.prepared {
+		return a.preparedContext, nil
+	}
 	format, err := output.ParseFormat(a.OutputName)
 	if err != nil {
 		return nil, err
@@ -57,6 +64,8 @@ func (a *App) prepareContext(ctx context.Context) (context.Context, error) {
 	if a.Timeout > 0 {
 		ctx, a.cancel = context.WithTimeout(ctx, a.Timeout)
 	}
+	a.prepared = true
+	a.preparedContext = ctx
 	return ctx, nil
 }
 
@@ -71,18 +80,29 @@ func (a *App) Client(ctx context.Context) (*bridge.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	var logWriter io.Writer
+	if a.Verbose {
+		logWriter = a.Err
+	}
 	instance, err := bridge.Start(ctx, bridge.Options{
 		BinaryPath: a.BridgeBin,
 		Version:    a.BridgeVersion,
 		Workspace:  a.Workspace,
 		APIKey:     apiKey,
 		Verbose:    a.Verbose,
+		LogWriter:  logWriter,
 	})
 	if err != nil {
 		return nil, err
 	}
 	a.bridge = instance
 	return instance.Client(), nil
+}
+
+func (a *App) ResolvedAPIKey() (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.resolveAPIKey()
 }
 
 func (a *App) Print(value any) error {
@@ -101,6 +121,8 @@ func (a *App) Close() error {
 		a.cancel()
 		a.cancel = nil
 	}
+	a.prepared = false
+	a.preparedContext = nil
 	return err
 }
 
@@ -111,5 +133,5 @@ func (a *App) resolveAPIKey() (string, error) {
 	if value := os.Getenv(a.APIKeyEnv); value != "" {
 		return value, nil
 	}
-	return "", fmt.Errorf("Cursor API key is required: set --api-key or environment variable %s", a.APIKeyEnv)
+	return "", fmt.Errorf("missing Cursor API key: set --api-key or environment variable %s", a.APIKeyEnv)
 }

@@ -125,7 +125,7 @@ func TestReleasePlatform(t *testing.T) {
 	}{
 		{goos: "linux", goarch: "amd64", platform: "linux", arch: "x64"},
 		{goos: "darwin", goarch: "arm64", platform: "darwin", arch: "arm64"},
-		{goos: "windows", goarch: "amd64", platform: "win32", arch: "x64"},
+		{goos: "windows", goarch: "amd64", shouldReturnError: true},
 		{goos: "windows", goarch: "arm64", shouldReturnError: true},
 		{goos: "plan9", goarch: "amd64", shouldReturnError: true},
 		{goos: "linux", goarch: "386", shouldReturnError: true},

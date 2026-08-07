@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,9 +15,13 @@ import (
 const maxFrameSize = 64 << 20
 
 type RPCError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Details []any  `json:"details,omitempty"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	HTTPStatus int    `json:"-"`
+	Details    []struct {
+		Type  string `json:"type"`
+		Value string `json:"value"`
+	} `json:"details,omitempty"`
 }
 
 func (e *RPCError) Error() string {
@@ -68,7 +73,7 @@ func (c *Client) Call(ctx context.Context, service, method string, requestValue,
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return decodeRPCError(response.Body, response.Status)
+		return decodeRPCError(response.Body, response.StatusCode, response.Status)
 	}
 	if responseValue == nil {
 		_, err := io.Copy(io.Discard, response.Body)
@@ -106,7 +111,7 @@ func (c *Client) Stream(ctx context.Context, service, method string, requestValu
 	}
 	if response.StatusCode != http.StatusOK {
 		defer response.Body.Close()
-		return nil, decodeRPCError(response.Body, response.Status)
+		return nil, decodeRPCError(response.Body, response.StatusCode, response.Status)
 	}
 	return &StreamReader{body: response.Body, maxFrameSize: maxFrameSize}, nil
 }
@@ -121,11 +126,16 @@ func (c *Client) setHeaders(request *http.Request, contentType string) {
 	request.Header.Set("Connect-Protocol-Version", "1")
 }
 
-func decodeRPCError(reader io.Reader, status string) error {
+func decodeRPCError(reader io.Reader, statusCode int, status string) error {
 	var rpcError RPCError
 	if err := json.NewDecoder(reader).Decode(&rpcError); err != nil {
-		return fmt.Errorf("bridge RPC returned %s", status)
+		return &RPCError{
+			Code:       "unknown",
+			Message:    fmt.Sprintf("bridge RPC returned %s with an invalid Connect error body", status),
+			HTTPStatus: statusCode,
+		}
 	}
+	rpcError.HTTPStatus = statusCode
 	if rpcError.Message == "" {
 		rpcError.Message = "bridge RPC returned " + status
 	}
@@ -142,33 +152,34 @@ func (r *StreamReader) Next(message any) error {
 	if r.done {
 		return io.EOF
 	}
-	for {
-		flags, payload, err := readFrame(r.body, r.maxFrameSize)
-		if err != nil {
-			return err
+	flags, payload, err := readFrame(r.body, r.maxFrameSize)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return fmt.Errorf("stream closed without EndStream frame: %w", io.ErrUnexpectedEOF)
 		}
-		switch flags {
-		case 0x00:
-			if err := json.Unmarshal(payload, message); err != nil {
-				return fmt.Errorf("decode stream message: %w", err)
-			}
-			return nil
-		case 0x02:
-			r.done = true
-			_ = r.body.Close()
-			var end struct {
-				Error *RPCError `json:"error"`
-			}
-			if err := json.Unmarshal(payload, &end); err != nil {
-				return fmt.Errorf("decode stream end: %w", err)
-			}
-			if end.Error != nil {
-				return end.Error
-			}
-			return io.EOF
-		default:
-			return fmt.Errorf("unsupported Connect frame flags 0x%02x", flags)
+		return err
+	}
+	switch flags {
+	case 0x00:
+		if err := json.Unmarshal(payload, message); err != nil {
+			return fmt.Errorf("decode stream message: %w", err)
 		}
+		return nil
+	case 0x02:
+		r.done = true
+		_ = r.body.Close()
+		var end struct {
+			Error *RPCError `json:"error"`
+		}
+		if err := json.Unmarshal(payload, &end); err != nil {
+			return fmt.Errorf("decode stream end: %w", err)
+		}
+		if end.Error != nil {
+			return end.Error
+		}
+		return io.EOF
+	default:
+		return fmt.Errorf("unsupported Connect frame flags 0x%02x", flags)
 	}
 }
 
@@ -179,7 +190,7 @@ func (r *StreamReader) Close() error {
 
 func writeFrame(writer io.Writer, flags byte, payload []byte) error {
 	if len(payload) > maxFrameSize {
-		return fmt.Errorf("Connect frame size %d exceeds limit %d", len(payload), maxFrameSize)
+		return fmt.Errorf("connect frame size %d exceeds limit %d", len(payload), maxFrameSize)
 	}
 	var header [5]byte
 	header[0] = flags
@@ -200,7 +211,7 @@ func readFrame(reader io.Reader, limit uint32) (byte, []byte, error) {
 	}
 	size := binary.BigEndian.Uint32(header[1:])
 	if size > limit {
-		return 0, nil, fmt.Errorf("Connect frame size %d exceeds limit %d", size, limit)
+		return 0, nil, fmt.Errorf("connect frame size %d exceeds limit %d", size, limit)
 	}
 	payload := make([]byte, size)
 	if _, err := io.ReadFull(reader, payload); err != nil {

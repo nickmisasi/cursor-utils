@@ -16,7 +16,12 @@ import (
 	"time"
 )
 
-const readyPrefix = "cursor-sdk-bridge ready "
+const (
+	readyPrefix          = "cursor-sdk-bridge ready "
+	maxReadyLineSize     = 1 << 20
+	maxStartupStderrSize = 8 << 10
+	bridgeCloseTimeout   = 2 * time.Second
+)
 
 type Options struct {
 	BinaryPath string
@@ -24,6 +29,7 @@ type Options struct {
 	Workspace  string
 	APIKey     string
 	Verbose    bool
+	LogWriter  io.Writer
 	HTTPClient *http.Client
 }
 
@@ -42,11 +48,11 @@ type Handshake struct {
 }
 
 type Bridge struct {
-	client    *Client
-	command   *exec.Cmd
-	wait      <-chan error
-	closeOnce sync.Once
-	closeErr  error
+	client     *Client
+	command    *exec.Cmd
+	stderrDone <-chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func Start(ctx context.Context, options Options) (*Bridge, error) {
@@ -84,14 +90,12 @@ func Start(ctx context.Context, options Options) (*Bridge, error) {
 		return nil, fmt.Errorf("start bridge: %w", err)
 	}
 
-	wait := make(chan error, 1)
-	go func() {
-		wait <- command.Wait()
-		close(wait)
-	}()
-
+	stderrDone := make(chan struct{})
 	ready := make(chan handshakeResult, 1)
-	go scanBridgeStderr(stderr, options.Verbose, ready)
+	go func() {
+		defer close(stderrDone)
+		scanBridgeStderr(stderr, options.LogWriter, ready)
+	}()
 
 	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
@@ -99,38 +103,33 @@ func Start(ctx context.Context, options Options) (*Bridge, error) {
 	select {
 	case result := <-ready:
 		if result.err != nil {
-			stopProcess(command, wait)
+			stopProcess(command, stderrDone)
 			return nil, result.err
 		}
 		handshake = result.handshake
-	case err := <-wait:
-		if err == nil {
-			err = fmt.Errorf("bridge exited before becoming ready")
-		}
-		return nil, fmt.Errorf("start bridge: %w", err)
 	case <-timer.C:
-		stopProcess(command, wait)
+		stopProcess(command, stderrDone)
 		return nil, fmt.Errorf("bridge did not become ready within 30s")
 	case <-ctx.Done():
-		stopProcess(command, wait)
+		stopProcess(command, stderrDone)
 		return nil, ctx.Err()
 	}
 
 	token, err := os.ReadFile(handshake.AuthTokenFile)
 	if err != nil {
-		stopProcess(command, wait)
+		stopProcess(command, stderrDone)
 		return nil, fmt.Errorf("read bridge auth token: %w", err)
 	}
 	trimmedToken := strings.TrimSpace(string(token))
 	if trimmedToken == "" {
-		stopProcess(command, wait)
+		stopProcess(command, stderrDone)
 		return nil, fmt.Errorf("bridge auth token is empty")
 	}
 
 	return &Bridge{
-		client:  NewClient(handshake.URL, trimmedToken, options.HTTPClient),
-		command: command,
-		wait:    wait,
+		client:     NewClient(handshake.URL, trimmedToken, options.HTTPClient),
+		command:    command,
+		stderrDone: stderrDone,
 	}, nil
 }
 
@@ -140,26 +139,26 @@ func (b *Bridge) Client() *Client {
 
 func (b *Bridge) Close() error {
 	b.closeOnce.Do(func() {
-		shutdownContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownContext, cancel := context.WithTimeout(context.Background(), bridgeCloseTimeout)
 		defer cancel()
 		_ = b.client.Call(
 			shutdownContext,
 			"SdkBridgeControlService",
 			"Shutdown",
 			map[string]any{"graceSeconds": 0},
-			&map[string]any{},
+			nil,
 		)
 
 		select {
-		case err := <-b.wait:
-			b.closeErr = acceptableExitError(err)
-		case <-time.After(750 * time.Millisecond):
+		case <-b.stderrDone:
+		case <-shutdownContext.Done():
 			if err := b.command.Process.Kill(); err != nil && !isProcessDone(err) {
 				b.closeErr = fmt.Errorf("kill bridge: %w", err)
 			}
-			if err := <-b.wait; b.closeErr == nil {
-				b.closeErr = acceptableExitError(err)
-			}
+			<-b.stderrDone
+		}
+		if err := b.command.Wait(); b.closeErr == nil {
+			b.closeErr = acceptableExitError(err)
 		}
 	})
 	return b.closeErr
@@ -170,33 +169,76 @@ type handshakeResult struct {
 	err       error
 }
 
-func scanBridgeStderr(reader io.Reader, verbose bool, ready chan<- handshakeResult) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 4096), 1024*1024)
-	found := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, readyPrefix) {
-			if !found {
-				handshake, err := parseHandshake(strings.TrimPrefix(line, readyPrefix))
-				ready <- handshakeResult{handshake: handshake, err: err}
-				found = true
+func scanBridgeStderr(reader io.Reader, logWriter io.Writer, ready chan<- handshakeResult) {
+	buffered := bufio.NewReader(reader)
+	destination := io.Discard
+	if logWriter != nil {
+		destination = logWriter
+	}
+	var startupStderr strings.Builder
+	for {
+		line, readErr := buffered.ReadString('\n')
+		if line != "" {
+			trimmed := strings.TrimRight(line, "\r\n")
+			if strings.HasPrefix(trimmed, readyPrefix) {
+				if len(line) > maxReadyLineSize {
+					ready <- handshakeResult{err: fmt.Errorf(
+						"bridge ready handshake exceeds %d bytes",
+						maxReadyLineSize,
+					)}
+				} else {
+					handshake, err := parseHandshake(strings.TrimPrefix(trimmed, readyPrefix))
+					ready <- handshakeResult{handshake: handshake, err: err}
+				}
+				io.Copy(destination, buffered)
+				return
 			}
-			continue
+			appendStartupStderr(&startupStderr, trimmed)
+			if len(line) > maxReadyLineSize {
+				ready <- handshakeResult{err: withStartupStderr(
+					fmt.Errorf("bridge stderr line exceeds %d bytes before ready handshake", maxReadyLineSize),
+					startupStderr.String(),
+				)}
+				io.Copy(destination, buffered)
+				return
+			}
+			if logWriter != nil {
+				io.WriteString(destination, line)
+			}
 		}
-		if verbose {
-			fmt.Fprintln(os.Stderr, line)
+		if readErr != nil {
+			var err error
+			if errors.Is(readErr, io.EOF) {
+				err = fmt.Errorf("bridge stderr closed before ready handshake")
+			} else {
+				err = fmt.Errorf("read bridge stderr: %w", readErr)
+			}
+			ready <- handshakeResult{err: withStartupStderr(err, startupStderr.String())}
+			io.Copy(destination, buffered)
+			return
 		}
 	}
-	if !found {
-		err := scanner.Err()
-		if err == nil {
-			err = fmt.Errorf("bridge stderr closed before ready handshake")
-		} else {
-			err = fmt.Errorf("read bridge stderr: %w", err)
-		}
-		ready <- handshakeResult{err: err}
+}
+
+func appendStartupStderr(destination *strings.Builder, line string) {
+	if line == "" || destination.Len() >= maxStartupStderrSize {
+		return
 	}
+	if destination.Len() > 0 {
+		destination.WriteString(" | ")
+	}
+	remaining := maxStartupStderrSize - destination.Len()
+	if len(line) > remaining {
+		line = line[:remaining]
+	}
+	destination.WriteString(line)
+}
+
+func withStartupStderr(err error, stderr string) error {
+	if stderr == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, stderr)
 }
 
 func parseHandshake(data string) (Handshake, error) {
@@ -239,9 +281,10 @@ func processEnvironment(apiKey string) []string {
 	return environment
 }
 
-func stopProcess(command *exec.Cmd, wait <-chan error) {
+func stopProcess(command *exec.Cmd, stderrDone <-chan struct{}) {
 	_ = command.Process.Kill()
-	<-wait
+	<-stderrDone
+	_ = command.Wait()
 }
 
 func acceptableExitError(err error) error {

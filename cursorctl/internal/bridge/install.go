@@ -145,10 +145,8 @@ func releasePlatform(goos, goarch string) (string, string, error) {
 		platform = "linux"
 	case "darwin":
 		platform = "darwin"
-	case "windows":
-		platform = "win32"
 	default:
-		return "", "", fmt.Errorf("unsupported bridge operating system %q", goos)
+		return "", "", fmt.Errorf("unsupported bridge platform %s/%s", goos, goarch)
 	}
 
 	var architecture string
@@ -159,9 +157,6 @@ func releasePlatform(goos, goarch string) (string, string, error) {
 		architecture = "arm64"
 	default:
 		return "", "", fmt.Errorf("unsupported bridge architecture %q", goarch)
-	}
-	if platform == "win32" && architecture != "x64" {
-		return "", "", fmt.Errorf("unsupported bridge platform %s-%s", platform, architecture)
 	}
 	return platform, architecture, nil
 }
@@ -178,7 +173,7 @@ func download(ctx context.Context, client *http.Client, url string) ([]byte, err
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, response.Body)
-		return nil, fmt.Errorf("GET %s returned %s", url, response.Status)
+		return nil, fmt.Errorf("download %s returned %s", url, response.Status)
 	}
 	return io.ReadAll(response.Body)
 }
@@ -200,7 +195,7 @@ func checksumFor(data []byte, filename string) (string, error) {
 			return fields[0], nil
 		}
 	}
-	return "", fmt.Errorf("SHA-256 checksum for %s not found", filename)
+	return "", fmt.Errorf("checksum for %s not found in SHA-256 manifest", filename)
 }
 
 func extractArchive(data []byte, destination string) error {
@@ -227,7 +222,7 @@ func extractArchive(data []byte, destination string) error {
 		if _, wanted := required[name]; !wanted {
 			continue
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return fmt.Errorf("bridge archive entry %s is not a regular file", name)
 		}
 		target := filepath.Join(destination, filepath.FromSlash(name))

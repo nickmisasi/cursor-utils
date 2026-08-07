@@ -52,7 +52,7 @@ func TestPrint(t *testing.T) {
 		{
 			name:   "toon",
 			format: FormatTOON,
-			want:   "count: 2\nname: widgets",
+			want:   "count: 2\nname: widgets\n",
 		},
 	}
 

@@ -3,13 +3,11 @@ package output
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
-	"unicode/utf16"
 )
 
 const toonIndent = 2
@@ -19,8 +17,9 @@ var (
 	numberPattern  = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$`)
 )
 
+// MarshalTOON accepts JSON-marshalable input; normalization rejects non-finite floats.
 func MarshalTOON(value any) ([]byte, error) {
-	normalized, err := normalize(replaceNonFinite(value))
+	normalized, err := normalize(value)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +44,7 @@ func (e *toonEncoder) root(value any) error {
 		return e.object(value, 0)
 	case []any:
 		return e.array("", value, 0)
-	case nil, bool, string, json.Number, float64, float32:
+	case nil, bool, string, json.Number:
 		e.line(0, toonScalar(value))
 		return nil
 	default:
@@ -70,7 +69,7 @@ func (e *toonEncoder) field(key string, value any, depth int) error {
 		return e.object(value, depth+1)
 	case []any:
 		return e.array(name, value, depth)
-	case nil, bool, string, json.Number, float64, float32:
+	case nil, bool, string, json.Number:
 		e.line(depth, name+": "+toonScalar(value))
 		return nil
 	default:
@@ -117,7 +116,7 @@ func (e *toonEncoder) array(name string, values []any, depth int) error {
 
 func (e *toonEncoder) listItem(value any, depth int) error {
 	switch value := value.(type) {
-	case nil, bool, string, json.Number, float64, float32:
+	case nil, bool, string, json.Number:
 		e.line(depth, "- "+toonScalar(value))
 		return nil
 	case []any:
@@ -160,7 +159,7 @@ func (e *toonEncoder) listItem(value any, depth int) error {
 func (e *toonEncoder) firstObjectField(key string, value any, depth int) error {
 	name := toonKey(key)
 	switch value := value.(type) {
-	case nil, bool, string, json.Number, float64, float32:
+	case nil, bool, string, json.Number:
 		e.line(depth, "- "+name+": "+toonScalar(value))
 		return nil
 	case map[string]any:
@@ -220,7 +219,7 @@ func allPrimitive(values []any) bool {
 
 func isPrimitive(value any) bool {
 	switch value.(type) {
-	case nil, bool, string, json.Number, float64, float32:
+	case nil, bool, string, json.Number:
 		return true
 	default:
 		return false
@@ -277,16 +276,6 @@ func toonScalar(value any) string {
 		return value
 	case json.Number:
 		return canonicalNumber(value.String())
-	case float64:
-		if math.IsNaN(value) || math.IsInf(value, 0) {
-			return "null"
-		}
-		return canonicalFloat(value, 64)
-	case float32:
-		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-			return "null"
-		}
-		return canonicalFloat(float64(value), 32)
 	default:
 		panic(fmt.Sprintf("unexpected TOON scalar %T", value))
 	}
@@ -300,10 +289,14 @@ func canonicalNumber(value string) string {
 		return value
 	}
 	number, err := strconv.ParseFloat(value, 64)
-	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+	if err != nil {
 		return "null"
 	}
-	return canonicalFloat(number, 64)
+	encoded, err := json.Marshal(number)
+	if err != nil {
+		panic(fmt.Sprintf("marshal normalized TOON number %q: %v", value, err))
+	}
+	return string(encoded)
 }
 
 func integerPattern(value string) bool {
@@ -316,13 +309,6 @@ func integerPattern(value string) bool {
 		}
 	}
 	return value != "" && value != "-"
-}
-
-func canonicalFloat(value float64, bits int) string {
-	if value == 0 {
-		return "0"
-	}
-	return strconv.FormatFloat(value, 'g', -1, bits)
 }
 
 func needsQuotes(value string) bool {
@@ -360,12 +346,7 @@ func quoteTOON(value string) string {
 			result.WriteString(`\t`)
 		default:
 			if unicode.IsControl(char) {
-				if char <= 0xffff {
-					fmt.Fprintf(&result, `\u%04X`, char)
-				} else {
-					first, second := utf16.EncodeRune(char)
-					fmt.Fprintf(&result, `\u%04X\u%04X`, first, second)
-				}
+				fmt.Fprintf(&result, `\u%04X`, char)
 			} else {
 				result.WriteRune(char)
 			}
@@ -373,33 +354,4 @@ func quoteTOON(value string) string {
 	}
 	result.WriteByte('"')
 	return result.String()
-}
-
-func replaceNonFinite(value any) any {
-	switch value := value.(type) {
-	case float64:
-		if math.IsNaN(value) || math.IsInf(value, 0) {
-			return nil
-		}
-		return value
-	case float32:
-		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-			return nil
-		}
-		return value
-	case []any:
-		result := make([]any, len(value))
-		for i, item := range value {
-			result[i] = replaceNonFinite(item)
-		}
-		return result
-	case map[string]any:
-		result := make(map[string]any, len(value))
-		for key, item := range value {
-			result[key] = replaceNonFinite(item)
-		}
-		return result
-	default:
-		return value
-	}
 }

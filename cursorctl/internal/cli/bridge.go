@@ -5,6 +5,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type bridgePingResponse struct {
+	Message string `json:"message"`
+}
+
+type bridgeVersionResponse struct {
+	BridgeVersion   string   `json:"bridgeVersion"`
+	ProtocolVersion string   `json:"protocolVersion"`
+	Capabilities    []string `json:"capabilities"`
+}
+
 func newBridgeCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "bridge",
@@ -42,23 +52,13 @@ func newBridgePingCommand(app *App) *cobra.Command {
 		Short: "Check that the SDK bridge is responsive",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			client, err := app.Client(command.Context())
-			if err != nil {
-				return err
-			}
-			var response struct {
-				Message string `json:"message"`
-			}
-			if err := client.Call(
-				command.Context(),
+			return runRPC[bridgePingResponse](
+				app,
+				command,
 				"SdkBridgeControlService",
 				"Ping",
 				map[string]any{},
-				&response,
-			); err != nil {
-				return err
-			}
-			return app.Print(response)
+			)
 		},
 	}
 }
@@ -69,25 +69,35 @@ func newBridgeVersionCommand(app *App) *cobra.Command {
 		Short: "Show SDK bridge protocol information",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			client, err := app.Client(command.Context())
-			if err != nil {
-				return err
-			}
-			var response struct {
-				BridgeVersion   string   `json:"bridgeVersion"`
-				ProtocolVersion string   `json:"protocolVersion"`
-				Capabilities    []string `json:"capabilities"`
-			}
-			if err := client.Call(
-				command.Context(),
+			return runRPC[bridgeVersionResponse](
+				app,
+				command,
 				"SdkBridgeControlService",
 				"GetVersion",
 				map[string]any{},
-				&response,
-			); err != nil {
-				return err
-			}
-			return app.Print(response)
+			)
 		},
 	}
+}
+
+func runRPC[T any](
+	app *App,
+	command *cobra.Command,
+	service string,
+	method string,
+	request any,
+) error {
+	// Commands call this directly so a child PersistentPreRunE cannot bypass initialization.
+	if err := prepareCommand(app, command); err != nil {
+		return err
+	}
+	client, err := app.Client(command.Context())
+	if err != nil {
+		return err
+	}
+	var response T
+	if err := client.Call(command.Context(), service, method, request, &response); err != nil {
+		return err
+	}
+	return app.Print(response)
 }

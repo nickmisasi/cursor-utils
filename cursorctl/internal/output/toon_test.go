@@ -113,18 +113,13 @@ func TestMarshalTOON(t *testing.T) {
 			name: "canonical numbers",
 			value: map[string]any{
 				"decimal":      json.Number("1.2300"),
+				"large":        1e21,
 				"negativeZero": math.Copysign(0, -1),
+				"regular":      1.5e6,
+				"small":        1e-7,
 				"zero":         json.Number("-0"),
 			},
-			want: "decimal: 1.23\nnegativeZero: 0\nzero: 0",
-		},
-		{
-			name: "nonfinite numbers become null",
-			value: map[string]any{
-				"inf": math.Inf(1),
-				"nan": math.NaN(),
-			},
-			want: "inf: null\nnan: null",
+			want: "decimal: 1.23\nlarge: 1e+21\nnegativeZero: 0\nregular: 1500000\nsmall: 1e-7\nzero: 0",
 		},
 		{
 			name: "tabular rejected for nested values",
@@ -159,6 +154,13 @@ func TestMarshalTOON(t *testing.T) {
 				t.Fatalf("MarshalTOON() =\n%s\nwant:\n%s", got, test.want)
 			}
 		})
+	}
+}
+
+func TestMarshalTOONRejectsNonFiniteNumbers(t *testing.T) {
+	_, err := MarshalTOON(map[string]any{"nan": math.NaN()})
+	if err == nil {
+		t.Fatal("MarshalTOON() error = nil")
 	}
 }
 
