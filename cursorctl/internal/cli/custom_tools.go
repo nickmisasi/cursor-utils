@@ -157,10 +157,6 @@ func injectAgentCustomTools(request map[string]any, declarations map[string]any)
 	return injectLocalCustomTools(options, declarations)
 }
 
-func injectPromptCustomTools(composite map[string]any, declarations map[string]any) error {
-	return injectAgentCustomTools(composite, declarations)
-}
-
 func injectLocalCustomTools(options map[string]any, declarations map[string]any) error {
 	if cloud, exists := options["cloud"]; exists && cloud != nil {
 		return fmt.Errorf("custom tools are supported for local agents only")

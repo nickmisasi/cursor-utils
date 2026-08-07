@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,5 +64,19 @@ func TestReadJSONPayloadErrors(t *testing.T) {
 				t.Fatalf("ReadJSONPayload(%q) error = nil", test.value)
 			}
 		})
+	}
+}
+
+func TestDecodeSingleJSONAcceptsAnyValueAndRejectsTrailing(t *testing.T) {
+	var value any
+	if err := decodeSingleJSON([]byte(`[1,2]`), &value); err != nil {
+		t.Fatalf("decodeSingleJSON() error = %v", err)
+	}
+	items, ok := value.([]any)
+	if !ok || len(items) != 2 || items[0] != json.Number("1") {
+		t.Fatalf("value = %#v", value)
+	}
+	if err := decodeSingleJSON([]byte(`true false`), &value); !errors.Is(err, errMultipleJSONValues) {
+		t.Fatalf("decodeSingleJSON() error = %v", err)
 	}
 }

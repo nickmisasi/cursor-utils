@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestRPCLeafCommandsHaveJSONFlag(t *testing.T) {
 	root, _ := NewRootCommand()
@@ -54,6 +57,32 @@ func TestNonRPCCommandsDoNotHaveJSONFlag(t *testing.T) {
 		if command.Flags().Lookup("json") != nil {
 			t.Errorf("%v unexpectedly has --json", path)
 		}
+	}
+}
+
+func TestEveryAppRunEPathPreparesWithoutRootHook(t *testing.T) {
+	for _, path := range [][]string{{"version"}, {"bridge", "install"}} {
+		root, _ := NewRootCommand()
+		if root.PersistentPreRunE != nil {
+			t.Fatal("root unexpectedly has PersistentPreRunE")
+		}
+		root.SetArgs(append(path, "--output", "invalid"))
+		if err := root.Execute(); err == nil {
+			t.Errorf("%v did not validate output format", path)
+		}
+	}
+}
+
+func TestCompletionDoesNotPrepareApp(t *testing.T) {
+	root, _ := NewRootCommand()
+	var output bytes.Buffer
+	root.SetOut(&output)
+	root.SetArgs([]string{"completion", "bash", "--output", "invalid"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("completion error = %v", err)
+	}
+	if output.Len() == 0 {
+		t.Fatal("completion output is empty")
 	}
 }
 

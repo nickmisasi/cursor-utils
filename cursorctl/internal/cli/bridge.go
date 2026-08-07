@@ -36,6 +36,9 @@ func newBridgeInstallCommand(app *App) *cobra.Command {
 		Short: "Install the pinned SDK bridge release (no RPC)",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
+			if err := prepareCommand(app, command); err != nil {
+				return err
+			}
 			result, err := bridge.EnsureInstalled(command.Context(), bridge.InstallOptions{
 				BinaryPath: app.BridgeBin,
 				Version:    app.BridgeVersion,
@@ -142,7 +145,7 @@ func runRPCWithClient[T any](
 	request any,
 	clientProvider rpcClientProvider,
 ) error {
-	// Commands call this directly so a child PersistentPreRunE cannot bypass initialization.
+	// Shared RPC runners prepare commands before dialing.
 	if err := prepareCommand(app, command); err != nil {
 		return err
 	}

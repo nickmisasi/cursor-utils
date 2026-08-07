@@ -16,7 +16,10 @@ func newVersionCommand(app *App) *cobra.Command {
 		Use:   "version",
 		Short: "Show cursorctl, pinned bridge, and Go versions",
 		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(command *cobra.Command, _ []string) error {
+			if err := prepareCommand(app, command); err != nil {
+				return err
+			}
 			return app.Print(map[string]any{
 				"version":       resolvedVersion(),
 				"bridgeVersion": bridge.DefaultVersion,

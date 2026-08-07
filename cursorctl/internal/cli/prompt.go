@@ -78,7 +78,7 @@ func newAgentPromptCommand(app *App) *cobra.Command {
 				}
 			}
 			if len(tools.registry) != 0 {
-				if err := injectPromptCustomTools(composite, tools.declarations); err != nil {
+				if err := injectAgentCustomTools(composite, tools.declarations); err != nil {
 					return err
 				}
 			}

@@ -1,10 +1,7 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 
 	"github.com/spf13/cobra"
 )
@@ -290,17 +287,8 @@ func getRunOptions(
 }
 
 func decodeJSONValue(value string) (any, error) {
-	decoder := json.NewDecoder(bytes.NewReader([]byte(value)))
-	decoder.UseNumber()
 	var result any
-	if err := decoder.Decode(&result); err != nil {
-		return nil, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return nil, fmt.Errorf("multiple JSON values")
-		}
+	if err := decodeSingleJSON([]byte(value), &result); err != nil {
 		return nil, err
 	}
 	return result, nil

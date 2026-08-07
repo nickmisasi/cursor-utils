@@ -24,7 +24,7 @@ cursorctl agent prompt \
 
 status="$(jq -r '.status' result.json)"
 summary="$(jq -r '.result' result.json)"
-pr_url="$(jq -r '.git.branches[]? | select(.prUrl != \"\") | .prUrl' result.json)"
+pr_url="$(jq -r '.git.branches[]? | select(.prUrl != "") | .prUrl' result.json)"
 ```
 
 `--quiet` makes the output one JSON `RunResult`, so normal `jq` expressions work. Without it, consume NDJSON as shown below.

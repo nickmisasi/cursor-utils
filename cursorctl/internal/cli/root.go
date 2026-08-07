@@ -48,9 +48,6 @@ func NewRootCommand() (*cobra.Command, *App) {
 		CompletionOptions: cobra.CompletionOptions{
 			HiddenDefaultCmd: true,
 		},
-		PersistentPreRunE: func(command *cobra.Command, _ []string) error {
-			return prepareCommand(app, command)
-		},
 	}
 	root.SetIn(app.In)
 	root.SetOut(app.Out)

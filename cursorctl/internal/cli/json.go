@@ -3,11 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 )
+
+var errMultipleJSONValues = errors.New("multiple JSON values")
 
 func (a *App) ReadJSONPayload(flagValue string) (map[string]any, error) {
 	var data []byte
@@ -31,21 +34,31 @@ func (a *App) ReadJSONPayload(flagValue string) (map[string]any, error) {
 		data = []byte(flagValue)
 	}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
 	var payload map[string]any
-	if err := decoder.Decode(&payload); err != nil {
+	if err := decodeSingleJSON(data, &payload); err != nil {
+		if errors.Is(err, errMultipleJSONValues) {
+			return nil, fmt.Errorf("payload contains multiple JSON values")
+		}
 		return nil, fmt.Errorf("decode JSON payload: %w", err)
 	}
 	if payload == nil {
 		return nil, fmt.Errorf("payload must be a JSON object")
 	}
+	return payload, nil
+}
+
+func decodeSingleJSON(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return nil, fmt.Errorf("payload contains multiple JSON values")
+			return errMultipleJSONValues
 		}
-		return nil, fmt.Errorf("decode JSON payload: %w", err)
+		return err
 	}
-	return payload, nil
+	return nil
 }

@@ -75,7 +75,7 @@ Common errors:
 A Connect stream must end with an EndStream frame. Abrupt network/process termination produces an exit-`1` error such as:
 
 ```text
-run stream ended unexpectedly: unexpected EOF
+run stream ended unexpectedly: stream closed without EndStream frame: unexpected EOF
 ```
 
 Other useful distinctions:
