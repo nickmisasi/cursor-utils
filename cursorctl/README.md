@@ -35,11 +35,13 @@ Pre-fetch the bridge for later offline use:
 cursorctl bridge install
 ```
 
-Set the API key before bridge RPC commands:
+Set the API key before agent, run, artifact, or catalog commands:
 
 ```bash
 export CURSOR_API_KEY="cursor_..."
 ```
+
+`bridge ping` and `bridge version` are control-plane checks and do not require a Cursor API key.
 
 ## Global flags
 
@@ -92,7 +94,6 @@ cursorctl
 │   ├── install
 │   ├── ping
 │   └── version
-├── completion       bash | fish | powershell | zsh
 └── version
 ```
 
@@ -165,7 +166,7 @@ Exit codes:
 
 Inspection commands can exit `0` while reporting a failed status because the inspection RPC itself succeeded. A successful detached send also exits `0` before the final run status is known.
 
-Every agent/run/artifact/catalog RPC leaf supports raw `--json` request mode. The value can be a literal object, `@file`, or `-` for stdin; it conflicts with positional and per-field payload flags. Cursorctl injects `apiKey` into request options where required. `agent prompt --json` uses the composite `{options,message,sendOptions,idempotencyKey?}` shape.
+Every RPC-backed leaf supports raw `--json` request mode, including `bridge ping` and `bridge version`. The value can be a literal object, `@file`, or `-` for stdin; it conflicts with positional and per-field payload flags. Cursorctl injects `apiKey` into request options where required. `agent prompt --json` uses the composite `{options,message,sendOptions,idempotencyKey?}` shape.
 
 ## Further reference
 

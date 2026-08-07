@@ -2,17 +2,57 @@ package cli
 
 import "testing"
 
-func TestPhase2LeafCommandsHaveJSONFlag(t *testing.T) {
+func TestRPCLeafCommandsHaveJSONFlag(t *testing.T) {
 	root, _ := NewRootCommand()
-	for _, namespace := range []string{"agent", "run"} {
-		command, _, err := root.Find([]string{namespace})
+	paths := [][]string{
+		{"agent", "create"}, {"agent", "resume"}, {"agent", "send"}, {"agent", "prompt"},
+		{"agent", "get"}, {"agent", "list"}, {"agent", "messages"}, {"agent", "usage"},
+		{"agent", "archive"}, {"agent", "unarchive"}, {"agent", "delete"},
+		{"agent", "close"}, {"agent", "reload"},
+		{"run", "get"}, {"run", "list"}, {"run", "wait"}, {"run", "watch"},
+		{"run", "cancel"}, {"run", "conversation"},
+		{"artifact", "list"}, {"artifact", "download"},
+		{"me"}, {"models"}, {"repos"},
+		{"bridge", "ping"}, {"bridge", "version"},
+	}
+	for _, path := range paths {
+		command, _, err := root.Find(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, child := range command.Commands() {
-			if child.Flags().Lookup("json") == nil {
-				t.Errorf("%s %s has no --json flag", namespace, child.Name())
-			}
+		if command.Flags().Lookup("json") == nil {
+			t.Errorf("%v has no --json flag", path)
+		}
+	}
+}
+
+func TestResumeDoesNotRegisterIdempotencyKey(t *testing.T) {
+	root, _ := NewRootCommand()
+	command, _, err := root.Find([]string{"agent", "resume"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Flags().Lookup("idempotency-key") != nil {
+		t.Fatal("agent resume unexpectedly registers --idempotency-key")
+	}
+}
+
+func TestDefaultCompletionCommandIsHidden(t *testing.T) {
+	root, _ := NewRootCommand()
+	if !root.CompletionOptions.HiddenDefaultCmd {
+		t.Fatal("default completion command is visible")
+	}
+}
+
+func TestNonRPCCommandsDoNotHaveJSONFlag(t *testing.T) {
+	root, _ := NewRootCommand()
+	for _, path := range [][]string{{"bridge", "install"}, {"version"}} {
+		command, _, err := root.Find(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if command.Flags().Lookup("json") != nil {
+			t.Errorf("%v unexpectedly has --json", path)
 		}
 	}
 }

@@ -53,7 +53,7 @@ Offsets are opaque exclusive resume tokens. `run watch --after-offset` must rece
 
 ## Raw `--json` request mode
 
-RPC data commands expose `--json` as an alternative to positional and per-field request construction. Accepted sources:
+Every RPC-backed leaf exposes `--json` as an alternative to positional and per-field request construction. Accepted sources:
 
 ```bash
 # Literal object.
@@ -79,7 +79,7 @@ Rules:
    - `--force` on agent delete;
    - custom-tool executor/declaration flags on create/send/prompt.
 4. Global flags such as `-o`, `--api-key`, `--timeout`, and bridge selection remain valid.
-5. Cursorctl resolves the API key even in raw mode. Where the request needs `options.apiKey`, it creates `options` if absent and injects the key unless `apiKey` already exists.
+5. Cursorctl resolves the API key even in raw mode for auth-backed RPCs. Where the request needs `options.apiKey`, it creates `options` if absent and injects the key unless `apiKey` already exists. Bridge control RPCs need no key.
 6. Apart from API-key injection and requested custom-tool declaration injection, raw payloads are forwarded as supplied; the bridge performs protobuf validation.
 
 For create/resume and option-bearing management calls:
@@ -108,7 +108,7 @@ Catalog RPCs (`me`, `models`, `repos`) always need `options.apiKey`; bridge envi
 
 Cursorctl turns it into CreateAgent, Send, and CloseAgent operations and injects the key into `options`.
 
-Infrastructure commands (`bridge install`, `bridge ping`, `bridge version`, `version`, and completion generation) do not expose `--json`.
+Bridge control RPCs accept `bridge ping --json <object>` and `bridge version --json <object>`; their normal request is `{}`. Non-RPC commands (`bridge install`, `version`, hidden completion generation, and help) do not expose `--json`.
 
 ## Exit codes
 

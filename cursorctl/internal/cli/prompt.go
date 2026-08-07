@@ -88,6 +88,7 @@ func newAgentPromptCommand(app *App) *cobra.Command {
 		},
 	}
 	addAgentOptionFlags(command, &agentFlags)
+	addIdempotencyKeyFlag(command, &agentFlags.idempotencyKey, "Idempotency key for create and send")
 	addSendFlags(command, &streamFlags)
 	addCustomToolFlags(command, &customFlags)
 	command.Flags().StringVar(

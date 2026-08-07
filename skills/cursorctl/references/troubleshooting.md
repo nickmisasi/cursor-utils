@@ -2,11 +2,13 @@
 
 ## Authentication failures
 
-Cursorctl resolves a key before starting the bridge:
+For agent, run, artifact, and catalog commands, cursorctl resolves a key before starting the bridge:
 
 1. `--api-key` if non-empty;
 2. otherwise the environment variable whose name is set by `--api-key-env`;
 3. otherwise exit `1`.
+
+`bridge ping` and `bridge version` are control-plane exceptions: they start the bridge and call their RPC without requiring or injecting a Cursor API key.
 
 For example:
 
@@ -45,7 +47,7 @@ The installer downloads `SHA256SUMS.txt` and the platform archive from the SDK B
 cursorctl bridge install
 ```
 
-`bridge install` itself needs no Cursor API key. For offline execution, pre-populate the cache or point at a regular local bridge binary:
+`bridge install`, `bridge ping`, and `bridge version` need no Cursor API key. For offline execution, pre-populate the cache or point at a regular local bridge binary:
 
 ```bash
 export CURSOR_SDK_BRIDGE_BIN=/opt/cursor/bin/cursor-sdk-bridge

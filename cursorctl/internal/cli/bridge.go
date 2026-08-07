@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+
 	"github.com/nickmisasi/cursor-utils/cursorctl/internal/bridge"
 	"github.com/spf13/cobra"
 )
@@ -47,38 +49,70 @@ func newBridgeInstallCommand(app *App) *cobra.Command {
 }
 
 func newBridgePingCommand(app *App) *cobra.Command {
-	return &cobra.Command{
+	var jsonValue string
+	command := &cobra.Command{
 		Use:   "ping",
 		Short: "Check bridge responsiveness with Ping",
-		Args:  cobra.NoArgs,
-		RunE: func(command *cobra.Command, _ []string) error {
-			return runRPC[bridgePingResponse](
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(command *cobra.Command, args []string) error {
+			request, err := buildUnaryRequest(
 				app,
 				command,
-				"SdkBridgeControlService",
-				"Ping",
-				map[string]any{},
+				args,
+				jsonValue,
+				0,
+				"bridge ping",
+				false,
+				nil,
+				func(_ []string, _ string) (map[string]any, error) {
+					return map[string]any{}, nil
+				},
+			)
+			if err != nil {
+				return err
+			}
+			return runControlRPC[bridgePingResponse](
+				app, command, "SdkBridgeControlService", "Ping", request,
 			)
 		},
 	}
+	addJSONFlag(command, &jsonValue)
+	return command
 }
 
 func newBridgeVersionCommand(app *App) *cobra.Command {
-	return &cobra.Command{
+	var jsonValue string
+	command := &cobra.Command{
 		Use:   "version",
 		Short: "Show SDK bridge protocol information with GetVersion",
-		Args:  cobra.NoArgs,
-		RunE: func(command *cobra.Command, _ []string) error {
-			return runRPC[bridgeVersionResponse](
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(command *cobra.Command, args []string) error {
+			request, err := buildUnaryRequest(
 				app,
 				command,
-				"SdkBridgeControlService",
-				"GetVersion",
-				map[string]any{},
+				args,
+				jsonValue,
+				0,
+				"bridge version",
+				false,
+				nil,
+				func(_ []string, _ string) (map[string]any, error) {
+					return map[string]any{}, nil
+				},
+			)
+			if err != nil {
+				return err
+			}
+			return runControlRPC[bridgeVersionResponse](
+				app, command, "SdkBridgeControlService", "GetVersion", request,
 			)
 		},
 	}
+	addJSONFlag(command, &jsonValue)
+	return command
 }
+
+type rpcClientProvider func(context.Context) (*bridge.Client, error)
 
 func runRPC[T any](
 	app *App,
@@ -87,11 +121,32 @@ func runRPC[T any](
 	method string,
 	request any,
 ) error {
+	return runRPCWithClient[T](app, command, service, method, request, app.Client)
+}
+
+func runControlRPC[T any](
+	app *App,
+	command *cobra.Command,
+	service string,
+	method string,
+	request any,
+) error {
+	return runRPCWithClient[T](app, command, service, method, request, app.ControlClient)
+}
+
+func runRPCWithClient[T any](
+	app *App,
+	command *cobra.Command,
+	service string,
+	method string,
+	request any,
+	clientProvider rpcClientProvider,
+) error {
 	// Commands call this directly so a child PersistentPreRunE cannot bypass initialization.
 	if err := prepareCommand(app, command); err != nil {
 		return err
 	}
-	client, err := app.Client(command.Context())
+	client, err := clientProvider(command.Context())
 	if err != nil {
 		return err
 	}

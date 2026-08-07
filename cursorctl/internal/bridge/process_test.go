@@ -108,6 +108,16 @@ func TestProcessEnvironmentOverridesCursorValues(t *testing.T) {
 	}
 }
 
+func TestProcessEnvironmentOmitsEmptyAPIKey(t *testing.T) {
+	t.Setenv("CURSOR_API_KEY", "old")
+	environment := processEnvironment("")
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, "CURSOR_API_KEY=") {
+			t.Fatalf("unexpected API key environment entry %q", entry)
+		}
+	}
+}
+
 func TestBridgeLifecycleWithFakeProcess(t *testing.T) {
 	tempDir := t.TempDir()
 	tokenPath := filepath.Join(tempDir, "token")

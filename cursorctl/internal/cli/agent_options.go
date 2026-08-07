@@ -46,7 +46,6 @@ func addAgentOptionFlags(command *cobra.Command, flags *agentOptionFlags) {
 	set.StringVar(&flags.name, "name", "", "Agent name")
 	set.StringVar(&flags.agentID, "agent-id", "", "Explicit agent ID in AgentOptions")
 	set.StringVar(&flags.mode, "mode", "", "Conversation mode: agent or plan")
-	set.StringVar(&flags.idempotencyKey, "idempotency-key", "", "Idempotency key for agent creation")
 	set.StringVar(&flags.cwd, "cwd", "", "Primary local working directory")
 	set.StringArrayVar(&flags.dirs, "dir", nil, "Additional local workspace directory (repeatable)")
 	set.StringArrayVar(&flags.settingSources, "setting-source", nil, "Local setting source (repeatable)")

@@ -18,7 +18,7 @@ These flags are inherited by every command:
 | `-v, --verbose` | bool | `false` | Write SDK Bridge diagnostics to stderr. |
 | `--workspace` | string | current directory | Absolute workspace passed to the bridge; also the default local `cwd`. |
 
-Except for `version`, `bridge install`, completion generation, and help, commands start a per-invocation bridge and therefore require the API key before the RPC is attempted.
+Agent, run, artifact, and catalog commands require the API key before their RPC is attempted. `bridge ping` and `bridge version` start a per-invocation bridge but need no Cursor API key; `version`, `bridge install`, completion generation, and help make no RPC.
 
 ## Root and namespace commands
 
@@ -31,7 +31,7 @@ These commands organize leaves and make no RPC:
 | `run` | none | none | Lists run subcommands with `--help`. |
 | `artifact` | none | none | Lists artifact subcommands with `--help`. |
 | `bridge` | none | none | Lists bridge subcommands with `--help`. |
-| `completion` | none | none | Lists completion generators with `--help`. |
+| `completion` | none | none | Hidden from root help; directly invoking it lists completion generators. |
 | `help [command]` | zero or more command names | none | Prints help for the selected command. |
 
 They inherit the global flags, although output/bridge/auth flags do not alter help text.
@@ -48,7 +48,6 @@ They inherit the global flags, although output/bridge/auth flags do not alter he
 | `--name` | string | `""` | `options.name`. |
 | `--agent-id` | string | `""` | `options.agentId` (not the resume positional ID). |
 | `--mode` | string | `""` | `options.mode`; accepts `agent` or `plan`. |
-| `--idempotency-key` | string | `""` | Top-level `idempotencyKey`. Displayed by `resume`, but `resume` rejects it if set because `ResumeAgent` has no such field. |
 | `--cwd` | string | `""` | `options.local.cwd[0]`; if no cloud/local flag is given, uses global `--workspace`. |
 | `--dir` | repeatable string | `[]` | `options.local.dirs[]`. |
 | `--setting-source` | repeatable string | `[]` | `options.local.settingSources[]`; values: `project`, `user`, `team`, `mdm`, `plugins`, `all`. |
@@ -71,9 +70,11 @@ They inherit the global flags, although output/bridge/auth flags do not alter he
 
 Local-option flags and cloud-option flags cannot be combined. Any cloud-option flag selects cloud options; otherwise cursorctl constructs local options.
 
+`agent create` and `agent prompt` additionally expose `--idempotency-key`; `agent resume` does not because `ResumeAgent` has no idempotency field.
+
 ### Send option set
 
-`agent send` exposes all of these. `agent prompt` exposes the execution flags; its `--model`, `--mode`, `--mcp-config`, and `--idempotency-key` come from the creation set and are also forwarded to Send.
+`agent send` exposes all of these. `agent prompt` exposes the execution flags; its `--model`, `--mode`, and `--mcp-config` come from the creation set and are also forwarded to Send. Its separate creation `--idempotency-key` is forwarded to both CreateAgent and Send.
 
 | Flag | Type | Default | Request/CLI behavior |
 | --- | --- | --- | --- |
@@ -107,7 +108,7 @@ Custom tools are local-only. On send, these flags register callback executors bu
 
 - Usage: `cursorctl agent create [flags]`; no positional arguments.
 - RPC: `SdkAgentService/CreateAgent`.
-- Flags: creation/resume option set, custom-tool flags, and `--json` (string, default `""`).
+- Flags: creation/resume option set, `--idempotency-key` (string, `""`), custom-tool flags, and `--json` (string, default `""`).
 - `--json`: `CreateAgentRequest`:
 
 ```json
@@ -133,7 +134,7 @@ Cursorctl injects `options.apiKey` unless supplied. Output:
 
 - Usage: `cursorctl agent resume <agent-id> [flags]`; exactly one positional agent ID.
 - RPC: `SdkAgentService/ResumeAgent`.
-- Flags: creation/resume option set and `--json` (string, `""`). `--idempotency-key` is shown in help but errors when changed.
+- Flags: creation/resume option set and `--json` (string, `""`). Resume does not register `--idempotency-key`.
 - `--json`: `{"agentId":"bc-...","options":{"cloud":{}}}`; cursorctl injects `options.apiKey`.
 - Output: `{"agentId":"bc-...","model":{"id":"..."}}`.
 
@@ -161,7 +162,7 @@ Default output is NDJSON stream records. `--quiet` prints a `RunResult`; `--deta
 - Usage: `cursorctl agent prompt <text> [flags]`.
 - Composite operation: `CreateAgent` → streaming `Send` → `CloseAgent`.
 - Requires exactly one text argument or `--message-file`; images alone do not satisfy prompt's message check.
-- Flags: creation/resume option set, send execution flags (`--message-file`, `--image`, `--force`, `--send-env-var`, `--deltas`, `--steps`, `--quiet`, `--detach`), custom-tool flags, and `--json` (string, `""`).
+- Flags: creation/resume option set, `--idempotency-key` (string, `""`), send execution flags (`--message-file`, `--image`, `--force`, `--send-env-var`, `--deltas`, `--steps`, `--quiet`, `--detach`), custom-tool flags, and `--json` (string, `""`).
 - `--json` is the composite shape, not an RPC request:
 
 ```json
@@ -333,17 +334,17 @@ All three use `SdkCursorService`, take no positionals, expose only `--json` (str
 
 ## Bridge and version commands
 
-These commands do not expose `--json`.
+The two bridge control RPCs expose `--json`; the non-RPC `bridge install` and `version` commands do not.
 
 | Command | Positional/local flags | RPC | Output |
 | --- | --- | --- | --- |
 | `bridge install` | none | none | `{"version":"v1.0.27","path":"...","cached":true}`; pre-fetches/verifies the bridge and needs no API key. |
-| `bridge ping` | none | `SdkBridgeControlService/Ping` with `{}` | `{"message":"pong"}`. |
-| `bridge version` | none | `SdkBridgeControlService/GetVersion` with `{}` | `{"bridgeVersion":"1.0.0","protocolVersion":"sdk.v1","capabilities":[...]}`. |
+| `bridge ping` | `--json` (string, `""`) | `SdkBridgeControlService/Ping` with `{}` | `{"message":"pong"}`. |
+| `bridge version` | `--json` (string, `""`) | `SdkBridgeControlService/GetVersion` with `{}` | `{"bridgeVersion":"1.0.0","protocolVersion":"sdk.v1","capabilities":[...]}`. |
 | `version` | none | none | `{"version":"...","bridgeVersion":"v1.0.27","goVersion":"go..."}`; needs no API key. |
 
-`bridge ping` and `bridge version` still require a key because cursorctl resolves the key before starting the bridge, even though their control RPC payloads contain no key.
+`bridge ping` and `bridge version` need no Cursor API key. Their raw JSON payload is passed through without API-key injection.
 
 ## Completion commands
 
-`completion bash`, `completion fish`, `completion powershell`, and `completion zsh` take no positional arguments and write a shell completion script to stdout. Each has `--no-descriptions` (bool, default `false`) plus inherited global flags. They have no RPC, no `--json`, and do not require an API key.
+The default `completion` command is hidden from root help but remains directly invokable. `completion bash`, `completion fish`, `completion powershell`, and `completion zsh` take no positional arguments and write a shell completion script to stdout. Each has `--no-descriptions` (bool, default `false`) plus inherited global flags. They have no RPC, no `--json`, and do not require an API key.

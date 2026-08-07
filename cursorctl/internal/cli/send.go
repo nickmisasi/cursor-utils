@@ -34,7 +34,11 @@ func addSharedSendFlags(command *cobra.Command, flags *sharedSendFlags) {
 	set.StringVar(&flags.model, "model", "", "Model identifier for this send")
 	set.StringVar(&flags.mode, "mode", "", "Conversation mode: agent or plan")
 	set.StringVar(&flags.mcpConfig, "mcp-config", "", "MCP server map as JSON, @file, or -")
-	set.StringVar(&flags.idempotencyKey, "idempotency-key", "", "Idempotency key for this send")
+	addIdempotencyKeyFlag(command, &flags.idempotencyKey, "Idempotency key for this send")
+}
+
+func addIdempotencyKeyFlag(command *cobra.Command, target *string, help string) {
+	command.Flags().StringVar(target, "idempotency-key", "", help)
 }
 
 func addSendFlags(command *cobra.Command, flags *sendFlags) {

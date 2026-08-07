@@ -82,6 +82,7 @@ func newAgentCreateCommand(app *App) *cobra.Command {
 		},
 	}
 	addAgentOptionFlags(command, &flags)
+	addIdempotencyKeyFlag(command, &flags.idempotencyKey, "Idempotency key for agent creation")
 	addCustomToolFlags(command, &customFlags)
 	addJSONFlag(command, &jsonValue)
 	return command
@@ -103,9 +104,6 @@ func newAgentResumeCommand(app *App) *cobra.Command {
 					use:           "agent resume",
 					injectOptions: true,
 					build: func(args []string, apiKey string) (map[string]any, error) {
-						if command.Flags().Changed("idempotency-key") {
-							return nil, fmt.Errorf("--idempotency-key is not supported by ResumeAgent")
-						}
 						options, err := buildAgentOptions(app, command, &flags, apiKey)
 						if err != nil {
 							return nil, err

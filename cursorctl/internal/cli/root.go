@@ -45,6 +45,9 @@ func NewRootCommand() (*cobra.Command, *App) {
 		Short:         "Manage Cursor SDK agents",
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		CompletionOptions: cobra.CompletionOptions{
+			HiddenDefaultCmd: true,
+		},
 		PersistentPreRunE: func(command *cobra.Command, _ []string) error {
 			return prepareCommand(app, command)
 		},

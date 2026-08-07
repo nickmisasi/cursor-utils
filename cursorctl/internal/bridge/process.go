@@ -277,11 +277,10 @@ func processEnvironment(apiKey string) []string {
 		}
 		environment = append(environment, entry)
 	}
-	environment = append(
-		environment,
-		"CURSOR_API_KEY="+apiKey,
-		"CURSOR_SDK_CLIENT_LANGUAGE=go",
-	)
+	if apiKey != "" {
+		environment = append(environment, "CURSOR_API_KEY="+apiKey)
+	}
+	environment = append(environment, "CURSOR_SDK_CLIENT_LANGUAGE=go")
 	return environment
 }
 

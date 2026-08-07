@@ -72,6 +72,14 @@ func (a *App) prepareContext(ctx context.Context) (context.Context, error) {
 }
 
 func (a *App) Client(ctx context.Context) (*bridge.Client, error) {
+	return a.client(ctx, true)
+}
+
+func (a *App) ControlClient(ctx context.Context) (*bridge.Client, error) {
+	return a.client(ctx, false)
+}
+
+func (a *App) client(ctx context.Context, requireAPIKey bool) (*bridge.Client, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.clientOverride != nil {
@@ -82,7 +90,7 @@ func (a *App) Client(ctx context.Context) (*bridge.Client, error) {
 	}
 
 	apiKey, err := a.resolveAPIKey()
-	if err != nil {
+	if err != nil && requireAPIKey {
 		return nil, err
 	}
 	var logWriter io.Writer
