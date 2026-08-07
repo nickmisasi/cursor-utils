@@ -18,7 +18,7 @@ type bridgeVersionResponse struct {
 func newBridgeCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "bridge",
-		Short: "Manage the Cursor SDK bridge",
+		Short: "Install and inspect the per-invocation SDK bridge",
 	}
 	command.AddCommand(
 		newBridgeInstallCommand(app),
@@ -31,7 +31,7 @@ func newBridgeCommand(app *App) *cobra.Command {
 func newBridgeInstallCommand(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Install the pinned SDK bridge release",
+		Short: "Install the pinned SDK bridge release (no RPC)",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			result, err := bridge.EnsureInstalled(command.Context(), bridge.InstallOptions{
@@ -49,7 +49,7 @@ func newBridgeInstallCommand(app *App) *cobra.Command {
 func newBridgePingCommand(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ping",
-		Short: "Check that the SDK bridge is responsive",
+		Short: "Check bridge responsiveness with Ping",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return runRPC[bridgePingResponse](
@@ -66,7 +66,7 @@ func newBridgePingCommand(app *App) *cobra.Command {
 func newBridgeVersionCommand(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Show SDK bridge protocol information",
+		Short: "Show SDK bridge protocol information with GetVersion",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return runRPC[bridgeVersionResponse](

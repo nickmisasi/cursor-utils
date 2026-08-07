@@ -57,16 +57,30 @@ func addSendFlags(command *cobra.Command, flags *sendFlags) {
 func newAgentSendCommand(app *App) *cobra.Command {
 	var shared sharedSendFlags
 	var flags sendFlags
+	var customFlags customToolFlags
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "send <agent-id> [text]",
-		Short: "Send a message and stream the run",
+		Short: "Send a message and stream the run with Send",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := validateStreamOutputFlags(flags.quiet, flags.detach); err != nil {
 				return err
 			}
-			request, raw, err := jsonRequest(app, command, args, jsonValue, "quiet", "detach")
+			tools, err := loadCustomTools(app, command, &customFlags)
+			if err != nil {
+				return err
+			}
+			request, raw, err := jsonRequest(
+				app,
+				command,
+				args,
+				jsonValue,
+				"quiet",
+				"detach",
+				"custom-tool",
+				"custom-tool-config",
+			)
 			if err != nil {
 				return err
 			}
@@ -79,18 +93,26 @@ func newAgentSendCommand(app *App) *cobra.Command {
 					return err
 				}
 			}
+			if len(tools.registry) != 0 {
+				if err := injectSendCustomTools(request, tools.declarations); err != nil {
+					return err
+				}
+			}
 			agentID, _ := request["agentId"].(string)
-			return runStreamRPC(
-				app,
-				command,
-				"Send",
-				request,
-				streamOutputOptions{quiet: flags.quiet, detach: flags.detach, agentID: agentID},
-			)
+			return withCustomToolServer(app, command, tools, func() error {
+				return runStreamRPC(
+					app,
+					command,
+					"Send",
+					request,
+					streamOutputOptions{quiet: flags.quiet, detach: flags.detach, agentID: agentID},
+				)
+			})
 		},
 	}
 	addSharedSendFlags(command, &shared)
 	addSendFlags(command, &flags)
+	addCustomToolFlags(command, &customFlags)
 	addJSONFlag(command, &jsonValue)
 	return command
 }

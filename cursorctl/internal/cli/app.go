@@ -26,6 +26,7 @@ type App struct {
 	Workspace     string
 	BridgeBin     string
 	BridgeVersion string
+	LocalStore    string
 	Timeout       time.Duration
 	Verbose       bool
 
@@ -93,6 +94,7 @@ func (a *App) Client(ctx context.Context) (*bridge.Client, error) {
 		Version:    a.BridgeVersion,
 		Workspace:  a.Workspace,
 		APIKey:     apiKey,
+		LocalStore: a.LocalStore,
 		Verbose:    a.Verbose,
 		LogWriter:  logWriter,
 	})

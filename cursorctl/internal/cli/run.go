@@ -12,7 +12,7 @@ import (
 func newRunCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "run",
-		Short: "Inspect and control agent runs",
+		Short: "Call SdkAgentService run RPCs",
 	}
 	command.AddCommand(
 		newRunGetCommand(app),
@@ -32,7 +32,7 @@ func newRunGetCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "get <run-id>",
-		Short: "Get a run snapshot",
+		Short: "Get a run snapshot with GetRun",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
@@ -63,7 +63,7 @@ func newRunListCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "list <agent-id>",
-		Short: "List runs for an agent",
+		Short: "List runs for an agent with ListRuns",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
@@ -100,7 +100,7 @@ func newRunWaitCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "wait <run-id>",
-		Short: "Wait for a run to finish",
+		Short: "Wait for a run to finish with WaitLiveRun",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			request, err := buildUnaryRequest(
@@ -147,7 +147,7 @@ func newRunWatchCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "watch <run-id>",
-		Short: "Stream durable run events",
+		Short: "Stream durable run events with ObserveRun",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			request, raw, err := jsonRequest(app, command, args, jsonValue, "quiet")
@@ -183,7 +183,7 @@ func newRunCancelCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "cancel <run-id>",
-		Short: "Cancel a run",
+		Short: "Cancel a run with CancelRun",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
@@ -207,7 +207,7 @@ func newRunConversationCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "conversation <run-id>",
-		Short: "Get a run conversation",
+		Short: "Get a run conversation with GetRunConversation",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			request, err := buildUnaryRequest(

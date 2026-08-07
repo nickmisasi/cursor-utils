@@ -60,6 +60,12 @@ func NewRootCommand() (*cobra.Command, *App) {
 	flags.StringVar(&app.Workspace, "workspace", workspace, "Workspace passed to the SDK bridge")
 	flags.StringVar(&app.BridgeBin, "bridge-bin", "", "Path to the SDK bridge binary")
 	flags.StringVar(&app.BridgeVersion, "bridge-version", bridge.DefaultVersion, "SDK bridge release version")
+	flags.StringVar(
+		&app.LocalStore,
+		"local-store",
+		"",
+		`Bridge local store JSON (sqlite/jsonl; custom stores are an embedder feature)`,
+	)
 	flags.DurationVar(
 		&app.Timeout,
 		"timeout",
@@ -72,6 +78,11 @@ func NewRootCommand() (*cobra.Command, *App) {
 		newBridgeCommand(app),
 		newAgentCommand(app),
 		newRunCommand(app),
+		newArtifactCommand(app),
+		newCatalogCommand(app, "me", "Me", "Get the authenticated Cursor user"),
+		newCatalogCommand(app, "models", "ListModels", "List available Cursor models"),
+		newCatalogCommand(app, "repos", "ListRepositories", "List accessible repositories"),
+		newVersionCommand(app),
 	)
 	return root, app
 }

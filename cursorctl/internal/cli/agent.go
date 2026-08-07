@@ -9,7 +9,7 @@ import (
 func newAgentCommand(app *App) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "agent",
-		Short: "Create and manage Cursor agents",
+		Short: "Call SdkAgentService agent RPCs",
 	}
 	command.AddCommand(
 		newAgentCreateCommand(app),
@@ -18,6 +18,8 @@ func newAgentCommand(app *App) *cobra.Command {
 		newAgentPromptCommand(app),
 		newAgentGetCommand(app),
 		newAgentListCommand(app),
+		newAgentMessagesCommand(app),
+		newAgentUsageCommand(app),
 		newAgentOperationCommand(app, "archive", "ArchiveAgent", false),
 		newAgentOperationCommand(app, "unarchive", "UnarchiveAgent", false),
 		newAgentOperationCommand(app, "delete", "DeleteAgent", true),
@@ -29,14 +31,27 @@ func newAgentCommand(app *App) *cobra.Command {
 
 func newAgentCreateCommand(app *App) *cobra.Command {
 	var flags agentOptionFlags
+	var customFlags customToolFlags
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "create",
-		Short: "Create an agent",
+		Short: "Create an agent with CreateAgent",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
+			tools, err := loadCustomTools(app, command, &customFlags)
+			if err != nil {
+				return err
+			}
 			return runUnaryCommand(
-				app, command, args, jsonValue, "CreateAgent", 0, "agent create", true, nil,
+				app,
+				command,
+				args,
+				jsonValue,
+				"CreateAgent",
+				0,
+				"agent create",
+				true,
+				[]string{"custom-tool", "custom-tool-config"},
 				func(_ []string, apiKey string) (map[string]any, error) {
 					options, err := buildAgentOptions(app, command, &flags, apiKey)
 					if err != nil {
@@ -48,10 +63,19 @@ func newAgentCreateCommand(app *App) *cobra.Command {
 					}
 					return request, nil
 				},
+				func(request map[string]any, run func() error) error {
+					if len(tools.registry) != 0 {
+						if err := injectAgentCustomTools(request, tools.declarations); err != nil {
+							return err
+						}
+					}
+					return withCustomToolServer(app, command, tools, run)
+				},
 			)
 		},
 	}
 	addAgentOptionFlags(command, &flags)
+	addCustomToolFlags(command, &customFlags)
 	addJSONFlag(command, &jsonValue)
 	return command
 }
@@ -61,7 +85,7 @@ func newAgentResumeCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "resume <agent-id>",
-		Short: "Resume an existing agent",
+		Short: "Resume an existing agent with ResumeAgent",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
@@ -89,7 +113,7 @@ func newAgentGetCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "get <agent-id>",
-		Short: "Get agent details",
+		Short: "Get agent details with GetAgent",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
@@ -119,7 +143,7 @@ func newAgentListCommand(app *App) *cobra.Command {
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "list",
-		Short: "List agents",
+		Short: "List agents with ListAgents",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(
@@ -171,7 +195,7 @@ func newAgentOperationCommand(
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   name + " <agent-id>",
-		Short: name + " an agent",
+		Short: name + " an agent with " + method,
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if requireForce && !force {
@@ -205,7 +229,7 @@ func newAgentSimpleCommand(app *App, name string, method string) *cobra.Command 
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   name + " <agent-id>",
-		Short: name + " an agent",
+		Short: name + " an agent with " + method,
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			return runUnaryCommand(

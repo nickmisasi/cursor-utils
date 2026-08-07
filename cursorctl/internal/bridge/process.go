@@ -28,6 +28,7 @@ type Options struct {
 	Version    string
 	Workspace  string
 	APIKey     string
+	LocalStore string
 	Verbose    bool
 	LogWriter  io.Writer
 	HTTPClient *http.Client
@@ -77,6 +78,9 @@ func Start(ctx context.Context, options Options) (*Bridge, error) {
 	}
 
 	args := []string{"--workspace", workspace, "--port", "0"}
+	if options.LocalStore != "" {
+		args = append(args, "--local-store", options.LocalStore)
+	}
 	if options.Verbose {
 		args = append(args, "--verbose")
 	}

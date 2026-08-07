@@ -12,16 +12,30 @@ import (
 func newAgentPromptCommand(app *App) *cobra.Command {
 	var agentFlags agentOptionFlags
 	var streamFlags sendFlags
+	var customFlags customToolFlags
 	var jsonValue string
 	command := &cobra.Command{
 		Use:   "prompt <text>",
-		Short: "Create an agent, run one prompt, and close the agent",
+		Short: "Compose CreateAgent, Send, and CloseAgent for one prompt",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := validateStreamOutputFlags(streamFlags.quiet, streamFlags.detach); err != nil {
 				return err
 			}
-			composite, raw, err := jsonRequest(app, command, args, jsonValue, "quiet", "detach")
+			tools, err := loadCustomTools(app, command, &customFlags)
+			if err != nil {
+				return err
+			}
+			composite, raw, err := jsonRequest(
+				app,
+				command,
+				args,
+				jsonValue,
+				"quiet",
+				"detach",
+				"custom-tool",
+				"custom-tool-config",
+			)
 			if err != nil {
 				return err
 			}
@@ -65,11 +79,19 @@ func newAgentPromptCommand(app *App) *cobra.Command {
 					composite["idempotencyKey"] = agentFlags.idempotencyKey
 				}
 			}
-			return runPrompt(app, command, composite, streamFlags)
+			if len(tools.registry) != 0 {
+				if err := injectPromptCustomTools(composite, tools.declarations); err != nil {
+					return err
+				}
+			}
+			return withCustomToolServer(app, command, tools, func() error {
+				return runPrompt(app, command, composite, streamFlags)
+			})
 		},
 	}
 	addAgentOptionFlags(command, &agentFlags)
 	addSendFlags(command, &streamFlags)
+	addCustomToolFlags(command, &customFlags)
 	command.Flags().StringVar(
 		&jsonValue,
 		"json",

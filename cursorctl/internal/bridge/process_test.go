@@ -112,6 +112,7 @@ func TestBridgeLifecycleWithFakeProcess(t *testing.T) {
 	tempDir := t.TempDir()
 	tokenPath := filepath.Join(tempDir, "token")
 	pidPath := filepath.Join(tempDir, "pid")
+	argsPath := filepath.Join(tempDir, "args")
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/sdk.v1.SdkBridgeControlService/Shutdown" {
@@ -147,10 +148,11 @@ func TestBridgeLifecycleWithFakeProcess(t *testing.T) {
 trap 'exit 0' TERM
 printf 'token\n' > %s
 printf '%%s\n' "$$" > %s
+printf '%%s\n' "$*" > %s
 printf 'cursor-sdk-bridge ready %%s\n' %s >&2
 printf 'verbose-after-ready\n' >&2
 while true; do sleep 0.05; done
-`, shellQuote(tokenPath), shellQuote(pidPath), shellQuote(string(handshake)))
+`, shellQuote(tokenPath), shellQuote(pidPath), shellQuote(argsPath), shellQuote(string(handshake)))
 	scriptPath := writeExecutable(t, tempDir, "fake-bridge", script)
 
 	var logs lockedBuffer
@@ -158,6 +160,8 @@ while true; do sleep 0.05; done
 		BinaryPath: scriptPath,
 		Workspace:  tempDir,
 		APIKey:     "dummy",
+		LocalStore: `{"type":"jsonl"}`,
+		Verbose:    true,
 		LogWriter:  &logs,
 		HTTPClient: server.Client(),
 	})
@@ -173,6 +177,14 @@ while true; do sleep 0.05; done
 	}
 	if instance.command.ProcessState == nil || !instance.command.ProcessState.Exited() {
 		t.Fatalf("fake bridge process state = %#v", instance.command.ProcessState)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), `--local-store {"type":"jsonl"}`) ||
+		!strings.Contains(string(args), "--verbose") {
+		t.Fatalf("bridge arguments = %q", args)
 	}
 }
 
