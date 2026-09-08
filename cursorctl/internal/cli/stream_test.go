@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -131,5 +132,72 @@ func TestStreamRunIDUsesOnlyProtocolLocations(t *testing.T) {
 		"message": map[string]any{"runId": "nested"},
 	}); got != "" {
 		t.Fatalf("streamRunID(assistant) = %q", got)
+	}
+}
+
+func TestAgentSendResumesBeforeSend(t *testing.T) {
+	tests := []struct {
+		name    string
+		agentID string
+		want    map[string]any
+	}{
+		{
+			name:    "cloud",
+			agentID: "bc-follow-up",
+			want: map[string]any{
+				"agentId": "bc-follow-up",
+				"options": map[string]any{
+					"apiKey": "test-api-key",
+					"cloud":  map[string]any{},
+				},
+			},
+		},
+		{
+			name:    "local",
+			agentID: "agent-local",
+			want: map[string]any{
+				"agentId": "agent-local",
+				"options": map[string]any{
+					"apiKey": "test-api-key",
+					"local":  map[string]any{"cwd": []any{"/workspace/project"}},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var resumeRequest map[string]any
+			var sendCalls int
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/sdk.v1.SdkAgentService/ResumeAgent":
+					if err := json.NewDecoder(request.Body).Decode(&resumeRequest); err != nil {
+						t.Errorf("decode ResumeAgent: %v", err)
+					}
+					io.WriteString(writer, `{"agentId":"`+test.agentID+`"}`)
+				case "/sdk.v1.SdkAgentService/Send":
+					sendCalls++
+					_ = readStreamRequest(t, request)
+					writer.Header().Set("Content-Type", "application/connect+json")
+					writeTestFrame(t, writer, 0x00, `{"result":{"agentId":"`+test.agentID+`","runId":"run-1","status":"FINISHED","result":{"agentId":"`+test.agentID+`","runId":"run-1","status":"FINISHED","result":"ok"}}}`)
+					writeTestFrame(t, writer, 0x02, `{}`)
+				default:
+					t.Errorf("unexpected path %q", request.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			root, _, _ := newTestRoot(server)
+			root.SetArgs([]string{"agent", "send", test.agentID, "hello", "--quiet"})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if sendCalls != 1 {
+				t.Fatalf("Send calls = %d", sendCalls)
+			}
+			if !reflect.DeepEqual(resumeRequest, test.want) {
+				t.Fatalf("ResumeAgent request = %#v\nwant %#v", resumeRequest, test.want)
+			}
+		})
 	}
 }

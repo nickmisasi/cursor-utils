@@ -37,10 +37,11 @@ cd cursorctl
 go build -o cursorctl .
 ```
 
-Set a Cursor API key and delegate one task:
+Store a Cursor API key as a named profile (do not `export CURSOR_API_KEY` in your shell rc files; Cursor’s `agent` CLI treats that variable as higher-priority than stored login), then delegate one task:
 
 ```bash
-export CURSOR_API_KEY="cursor_..."
+cursorctl auth add work --stdin --default
+# paste the key from https://cursor.com/dashboard/api, then Ctrl-D
 
 cursorctl agent prompt \
   --repo https://github.com/acme/widgets@main \
@@ -60,6 +61,7 @@ For agent-facing, progressive-disclosure guidance, start with the [`cursorctl` s
 | --- | --- |
 | [`cursorctl/`](cursorctl/) | Go CLI module and CLI-focused README. |
 | [`cursorctl/internal/cli/`](cursorctl/internal/cli/) | Command definitions, flag mapping, stream behavior, and exit-code handling. |
+| [`cursorctl/internal/auth/`](cursorctl/internal/auth/) | Named API-key profile store (`~/.config/cursorctl/credentials.json`). |
 | [`cursorctl/internal/bridge/`](cursorctl/internal/bridge/) | Bridge installer, process lifecycle, and Connect RPC client. |
 | [`cursorctl/internal/output/`](cursorctl/internal/output/) | JSON, YAML, and TOON output encoders. |
 | [`cursorctl/internal/toolserver/`](cursorctl/internal/toolserver/) | Loopback callback executor for local-agent custom tools. |

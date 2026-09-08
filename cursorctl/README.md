@@ -42,7 +42,7 @@ Representative development-build output:
 ```json
 {
   "bridgeVersion": "v1.0.27",
-  "goVersion": "go1.22.2",
+  "goVersion": "go1.26.3",
   "version": "(devel)"
 }
 ```
@@ -53,20 +53,22 @@ Pre-fetch the bridge for later offline use:
 cursorctl bridge install
 ```
 
-Set the API key before agent, run, artifact, or catalog commands:
+Store a Cursor API key before agent, run, artifact, or catalog commands. Prefer a named profile over exporting `CURSOR_API_KEY` in the shell (that variable shadows Cursor’s `agent` CLI login):
 
 ```bash
-export CURSOR_API_KEY="cursor_..."
+cursorctl auth add work --stdin --default
+# paste the key from https://cursor.com/dashboard/api, then Ctrl-D
 ```
 
-`bridge ping` and `bridge version` are control-plane checks and do not require a Cursor API key.
+`CURSOR_API_KEY=… cursorctl me` still works for CI one-offs. `bridge ping` and `bridge version` are control-plane checks and do not require a Cursor API key. `auth` commands manage the local store and also need no key.
 
 ## Global flags
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--api-key string` | empty | Explicit Cursor API key; overrides `--api-key-env`. |
+| `--api-key string` | empty | Explicit Cursor API key; overrides `--api-key-env` and stored profiles. |
 | `--api-key-env string` | `CURSOR_API_KEY` | Environment variable name containing the key. |
+| `--profile string` | empty | Named auth profile; overrides `CURSORCTL_PROFILE` and the stored default. |
 | `--bridge-bin string` | empty | SDK Bridge binary override. |
 | `--bridge-version string` | `v1.0.27` | SDK Bridge release to install/use. |
 | `--local-store string` | empty | Bridge local-store JSON (`sqlite`/`jsonl`). |
@@ -75,7 +77,7 @@ export CURSOR_API_KEY="cursor_..."
 | `-v, --verbose` | `false` | Show SDK Bridge diagnostics on stderr. |
 | `--workspace string` | current directory | Workspace passed to the bridge and default local cwd. |
 
-The explicit key is sensitive; prefer the environment for routine shell use. If `--api-key-env` is changed, missing-key errors name the selected variable.
+The explicit `--api-key` value is sensitive. Prefer `cursorctl auth add` for routine use. Resolution order is `--api-key`, then the env var named by `--api-key-env`, then `--profile`/`CURSORCTL_PROFILE`, then the stored default profile. If `--api-key-env` is changed, missing-key errors name the selected variable.
 
 ## Command tree
 
@@ -108,6 +110,11 @@ cursorctl
 ├── me               Cursor catalog Me
 ├── models           Cursor catalog ListModels
 ├── repos            Cursor catalog ListRepositories
+├── auth
+│   ├── add
+│   ├── list
+│   ├── default
+│   └── remove
 ├── bridge
 │   ├── install
 │   ├── ping

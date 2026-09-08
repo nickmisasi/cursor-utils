@@ -237,3 +237,40 @@ func TestAgentPromptClosesAfterStreamErrorAndForwardsJSONIdempotency(t *testing.
 		t.Fatalf("CreateAgent options = %#v", options)
 	}
 }
+
+func TestAgentPromptDetachSkipsClose(t *testing.T) {
+	var closeCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/sdk.v1.SdkAgentService/CreateAgent":
+			io.WriteString(writer, `{"agentId":"bc-prompt-detach","model":{"id":"m"}}`)
+		case "/sdk.v1.SdkAgentService/Send":
+			_ = readStreamRequest(t, request)
+			writer.Header().Set("Content-Type", "application/connect+json")
+			writeTestFrame(t, writer, 0x00, `{"sdkMessage":{"type":"system","message":{"subtype":"init","runId":"run-detach"}}}`)
+			writeTestFrame(t, writer, 0x02, `{}`)
+		case "/sdk.v1.SdkAgentService/CloseAgent":
+			closeCalls.Add(1)
+			io.WriteString(writer, `{}`)
+		default:
+			t.Errorf("unexpected path %q", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	root, _, output := newTestRoot(server)
+	root.SetArgs([]string{"agent", "prompt", "--detach", "--repo", "https://github.com/acme/repo@main", "work"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if closeCalls.Load() != 0 {
+		t.Fatalf("CloseAgent calls = %d, want 0", closeCalls.Load())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(output.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["agentId"] != "bc-prompt-detach" || got["runId"] != "run-detach" {
+		t.Fatalf("output = %#v", got)
+	}
+}

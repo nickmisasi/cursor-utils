@@ -115,6 +115,8 @@ func TestAgentSendStartsExecutorWithoutRewritingRawRequest(t *testing.T) {
 				}
 			}
 			io.WriteString(writer, `{}`)
+		case "/sdk.v1.SdkAgentService/ResumeAgent":
+			io.WriteString(writer, `{"agentId":"agent-1"}`)
 		case "/sdk.v1.SdkAgentService/Send":
 			sendRequest = readStreamRequest(t, request)
 			writeTestFrame(

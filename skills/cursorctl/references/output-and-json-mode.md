@@ -78,7 +78,7 @@ Rules:
    - `--file` on artifact download;
    - `--force` on agent delete;
    - custom-tool executor/declaration flags on create/send/prompt.
-4. Global flags such as `-o`, `--api-key`, `--timeout`, and bridge selection remain valid.
+4. Global flags such as `-o`, `--api-key`, `--profile`, `--timeout`, and bridge selection remain valid.
 5. Cursorctl resolves the API key even in raw mode for auth-backed RPCs. Where the request needs `options.apiKey`, it creates `options` if absent and injects the key unless `apiKey` already exists. Bridge control RPCs need no key.
 6. Apart from API-key injection and requested custom-tool declaration injection, raw payloads are forwarded as supplied; the bridge performs protobuf validation.
 

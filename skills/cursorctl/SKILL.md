@@ -12,7 +12,10 @@ Use explicit cloud flags when delegating. `--repo URL[@ref]` selects cloud; with
 ## Start here
 
 ```bash
-export CURSOR_API_KEY="cursor_..."
+# Store a user API key from https://cursor.com/dashboard/api.
+# Do not export CURSOR_API_KEY in zshrc; Cursor's agent CLI treats that
+# variable as higher-priority than stored login.
+cursorctl auth add work --stdin --default
 
 # Spawn a cloud agent, wait, and print only the terminal result.
 cursorctl agent prompt \
@@ -85,7 +88,7 @@ For local agents, `agent create --custom-tool NAME=COMMAND` declares a tool. Pas
 
 1. Exit `2` is a completed run with terminal status `ERROR`, `CANCELLED`, or `EXPIRED`; exit `1` is a CLI, bridge, RPC, or stream failure. Exit `0` means `FINISHED` for run-returning commands.
 2. `--json` is a complete raw RPC request, not an extra options object. It conflicts with positional and per-field flags by default. `--quiet`, `--detach`, artifact `--file`, and custom-tool executor flags are the documented exceptions where applicable.
-3. `me`, `models`, and `repos` require the Cursor API key inside `options`; cursorctl injects it, but the key must still resolve from `--api-key` or the environment named by `--api-key-env`.
-4. `--detach` is not cancellation. Use `cursorctl run cancel RUN_ID` to request cancellation.
+3. `me`, `models`, and `repos` require the Cursor API key inside `options`; cursorctl injects it from `--api-key`, the env named by `--api-key-env`, `--profile`/`CURSORCTL_PROFILE`, or the stored default profile (`cursorctl auth add`).
+4. `--detach` is not cancellation. `agent prompt --detach` skips `CloseAgent`. Follow up later with `agent send bc-...` (it resumes in the same process, then sends). Use `cursorctl run cancel RUN_ID` to request cancellation.
 5. `agent send`, `agent prompt`, and `run watch` write one compact JSON event per line regardless of `-o`. Use `--quiet` to suppress events and format only the final result with `-o`.
 6. `run watch --after-offset` accepts only an offset previously emitted by `run watch`/`ObserveRun`, not an offset from the initial `agent send` stream.

@@ -8,8 +8,9 @@ These flags are inherited by every command:
 
 | Flag | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `--api-key` | string | `""` | Cursor API key; sensitive and takes precedence over `--api-key-env`. |
+| `--api-key` | string | `""` | Cursor API key; sensitive and takes precedence over `--api-key-env` and stored profiles. |
 | `--api-key-env` | string | `"CURSOR_API_KEY"` | Name of the environment variable containing the key. |
+| `--profile` | string | `""` | Named auth profile. Overrides `CURSORCTL_PROFILE` and the stored default. |
 | `--bridge-bin` | string | `""` | SDK Bridge binary path. Takes precedence over `CURSOR_SDK_BRIDGE_BIN`. |
 | `--bridge-version` | string | `"v1.0.27"` | SDK Bridge release to install/use. |
 | `--local-store` | string | `""` | Bridge local-store JSON (`sqlite`/`jsonl`; custom stores are for embedders). |
@@ -18,7 +19,7 @@ These flags are inherited by every command:
 | `-v, --verbose` | bool | `false` | Write SDK Bridge diagnostics to stderr. |
 | `--workspace` | string | current directory | Absolute workspace passed to the bridge; also the default local `cwd`. |
 
-Agent, run, artifact, and catalog commands require the API key before their RPC is attempted. `bridge ping` and `bridge version` start a per-invocation bridge but need no Cursor API key; `version`, `bridge install`, completion generation, and help make no RPC.
+Agent, run, artifact, and catalog commands require the API key before their RPC is attempted. Resolution order is `--api-key`, then the env var named by `--api-key-env`, then `--profile`/`CURSORCTL_PROFILE`, then the stored default profile. `bridge ping` and `bridge version` start a per-invocation bridge but need no Cursor API key; `auth *`, `version`, `bridge install`, completion generation, and help make no RPC.
 
 ## Root and namespace commands
 
@@ -30,6 +31,7 @@ These commands organize leaves and make no RPC:
 | `agent` | none | none | Lists agent subcommands with `--help`. |
 | `run` | none | none | Lists run subcommands with `--help`. |
 | `artifact` | none | none | Lists artifact subcommands with `--help`. |
+| `auth` | none | none | Lists auth subcommands with `--help`. |
 | `bridge` | none | none | Lists bridge subcommands with `--help`. |
 | `completion` | none | none | Hidden from root help; directly invoking it lists completion generators. |
 | `help [command]` | zero or more command names | none | Prints help for the selected command. |
@@ -141,7 +143,7 @@ Cursorctl injects `options.apiKey` unless supplied. Output:
 ### `agent send`
 
 - Usage: `cursorctl agent send <agent-id> [text] [flags]`.
-- RPC: streaming `SdkAgentService/Send`.
+- RPC: `ResumeAgent` then streaming `SdkAgentService/Send`, in the same bridge process. Cloud IDs (`bc-…`) resume with `{apiKey, cloud:{}}`; other IDs resume with `{apiKey, local:{cwd:[workspace]}}`.
 - Positional text is optional only when `--message-file` or at least one `--image` supplies the message.
 - Flags: complete send option set, custom-tool flags, and `--json` (string, `""`).
 - `--json`: `SendRequest`:
@@ -160,7 +162,7 @@ Default output is NDJSON stream records. `--quiet` prints a `RunResult`; `--deta
 ### `agent prompt`
 
 - Usage: `cursorctl agent prompt <text> [flags]`.
-- Composite operation: `CreateAgent` → streaming `Send` → `CloseAgent`.
+- Composite operation: `CreateAgent` → streaming `Send` → `CloseAgent`. `--detach` skips `CloseAgent` so a later `agent send` can follow up.
 - Requires exactly one text argument or `--message-file`; images alone do not satisfy prompt's message check.
 - Flags: creation/resume option set, `--idempotency-key` (string, `""`), send execution flags (`--message-file`, `--image`, `--force`, `--send-env-var`, `--deltas`, `--steps`, `--quiet`, `--detach`), custom-tool flags, and `--json` (string, `""`).
 - `--json` is the composite shape, not an RPC request:
@@ -331,6 +333,21 @@ All three use `SdkCursorService`, take no positionals, expose only `--json` (str
 | `me` | `Me` | `{"user":{"apiKeyName":"...","userId":"...","userEmail":"...",...}}` |
 | `models` | `ListModels` | `{"items":[{"id":"...","displayName":"...","description":"...","parameters":[],"variants":[]},...]}` |
 | `repos` | `ListRepositories` | `{"items":[{"url":"https://github.com/acme/widgets"},...]}` |
+
+## Auth commands
+
+Auth commands write and read `credentials.json` under `$CURSORCTL_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursorctl`, else `~/.config/cursorctl`. The file is `0600`; the directory is `0700`. They print through `-o` and never emit full API keys (fingerprints are `…` plus the last four characters). They need no Cursor API key and make no RPC.
+
+Profile names match `[A-Za-z0-9][A-Za-z0-9._-]*`.
+
+| Command | Positional/local flags | Output |
+| --- | --- | --- |
+| `auth add <name>` | `--stdin` (bool, `false`), `--default` (bool, `false`), `--force` (bool, `false`) | `{"name":"work","fingerprint":"…wxyz","default":true}`. Reads the key from stdin when `--stdin` is set; otherwise prompts on a TTY with a hidden `ReadPassword`. Replacing an existing name requires `--force`. The first stored profile becomes the default; `--default` switches it. |
+| `auth list` | none | `{"defaultProfile":"work","profiles":[{"name":"personal","fingerprint":"…abcd","default":false},{"name":"work","fingerprint":"…wxyz","default":true}]}`. |
+| `auth default [name]` | optional profile name | `{"defaultProfile":"work"}`. With a name, sets that profile as default. With no name, reports the current default (empty string if none). |
+| `auth remove <name>` | none | `{"name":"work","removed":true}`. If the removed profile was default, `defaultProfile` is cleared rather than silently reassigned. |
+
+`--api-key` on `auth add` is not accepted as the stored secret (argv leakage). Use `--stdin` or the TTY prompt.
 
 ## Bridge and version commands
 

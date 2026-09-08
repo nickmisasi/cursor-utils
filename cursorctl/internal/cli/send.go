@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -97,6 +98,9 @@ func newAgentSendCommand(app *App) *cobra.Command {
 			}
 			agentID, _ := request["agentId"].(string)
 			return withCustomToolServer(app, command, tools, func() error {
+				if err := resumeAgentForSend(app, command, agentID); err != nil {
+					return err
+				}
 				return runStreamRPC(
 					app,
 					command,
@@ -274,4 +278,45 @@ func validateStreamOutputFlags(quiet bool, detach bool) error {
 		return fmt.Errorf("cannot combine --quiet with --detach")
 	}
 	return nil
+}
+
+func resumeAgentForSend(app *App, command *cobra.Command, agentID string) error {
+	if agentID == "" {
+		return fmt.Errorf("agent send requires an agent ID")
+	}
+	if err := prepareCommand(app, command); err != nil {
+		return err
+	}
+	apiKey, err := app.ResolvedAPIKey()
+	if err != nil {
+		return err
+	}
+	client, err := app.Client(command.Context())
+	if err != nil {
+		return err
+	}
+	var response map[string]any
+	if err := client.Call(
+		command.Context(),
+		"SdkAgentService",
+		"ResumeAgent",
+		map[string]any{
+			"agentId": agentID,
+			"options": resumeOptionsForAgent(app, agentID, apiKey),
+		},
+		&response,
+	); err != nil {
+		return fmt.Errorf("resume agent %s: %w", agentID, err)
+	}
+	return nil
+}
+
+func resumeOptionsForAgent(app *App, agentID string, apiKey string) map[string]any {
+	options := map[string]any{"apiKey": apiKey}
+	if strings.HasPrefix(agentID, "bc-") {
+		options["cloud"] = map[string]any{}
+		return options
+	}
+	options["local"] = map[string]any{"cwd": []string{app.Workspace}}
+	return options
 }

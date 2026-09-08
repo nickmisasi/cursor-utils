@@ -172,6 +172,9 @@ func runPrompt(
 			streamOutputOptions{quiet: flags.quiet, detach: flags.detach, agentID: agentID},
 		)
 	}
+	if flags.detach && streamErr == nil {
+		return nil
+	}
 	closeErr := closeAgent(client, agentID)
 	if streamErr != nil {
 		return streamErr
