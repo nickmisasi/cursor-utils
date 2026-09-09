@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nickmisasi/cursor-utils/cursorctl/internal/auth"
 	"github.com/nickmisasi/cursor-utils/cursorctl/internal/bridge"
 	"github.com/nickmisasi/cursor-utils/cursorctl/internal/output"
 )
@@ -23,6 +25,7 @@ type App struct {
 	OutputName    string
 	APIKeyEnv     string
 	APIKey        string
+	Profile       string
 	Workspace     string
 	BridgeBin     string
 	BridgeVersion string
@@ -144,8 +147,31 @@ func (a *App) resolveAPIKey() (string, error) {
 	if a.APIKey != "" {
 		return a.APIKey, nil
 	}
-	if value := os.Getenv(a.APIKeyEnv); value != "" {
-		return value, nil
+	if a.APIKeyEnv != "" {
+		if value := os.Getenv(a.APIKeyEnv); value != "" {
+			return value, nil
+		}
 	}
-	return "", fmt.Errorf("missing Cursor API key: set --api-key or environment variable %s", a.APIKeyEnv)
+	name := a.Profile
+	if name == "" {
+		name = os.Getenv(auth.ProfileEnv)
+	}
+	if name != "" {
+		profile, err := auth.Lookup(name)
+		if err != nil {
+			return "", err
+		}
+		return profile.APIKey, nil
+	}
+	_, profile, err := auth.LookupDefault()
+	if err == nil {
+		return profile.APIKey, nil
+	}
+	if !errors.Is(err, auth.ErrNoDefault) {
+		return "", err
+	}
+	return "", fmt.Errorf(
+		"missing Cursor API key: set --api-key, environment variable %s, or run cursorctl auth add <name>",
+		a.APIKeyEnv,
+	)
 }

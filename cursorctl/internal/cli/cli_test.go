@@ -27,12 +27,19 @@ func newTestRoot(server *httptest.Server) (*cobra.Command, *App, *bytes.Buffer) 
 func newStreamServer(t *testing.T, send func(io.Writer)) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Content-Type") != "application/connect+json" {
-			t.Errorf("Content-Type = %q", request.Header.Get("Content-Type"))
+		switch request.URL.Path {
+		case "/sdk.v1.SdkAgentService/ResumeAgent":
+			io.WriteString(writer, `{"agentId":"resumed"}`)
+		case "/sdk.v1.SdkAgentService/Send":
+			if request.Header.Get("Content-Type") != "application/connect+json" {
+				t.Errorf("Content-Type = %q", request.Header.Get("Content-Type"))
+			}
+			_ = readStreamRequest(t, request)
+			writer.Header().Set("Content-Type", "application/connect+json")
+			send(writer)
+		default:
+			t.Errorf("unexpected path %q", request.URL.Path)
 		}
-		_ = readStreamRequest(t, request)
-		writer.Header().Set("Content-Type", "application/connect+json")
-		send(writer)
 	}))
 }
 

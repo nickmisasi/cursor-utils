@@ -6,9 +6,11 @@ For agent, run, artifact, and catalog commands, cursorctl resolves a key before 
 
 1. `--api-key` if non-empty;
 2. otherwise the environment variable whose name is set by `--api-key-env`;
-3. otherwise exit `1`.
+3. otherwise `--profile` if non-empty, else `CURSORCTL_PROFILE`;
+4. otherwise the stored default profile from `credentials.json`;
+5. otherwise exit `1`.
 
-`bridge ping` and `bridge version` are control-plane exceptions: they start the bridge and call their RPC without requiring or injecting a Cursor API key.
+`bridge ping` and `bridge version` are control-plane exceptions: they start the bridge and call their RPC without requiring or injecting a Cursor API key. `auth` commands only touch the local credentials file.
 
 For example:
 
@@ -16,11 +18,13 @@ For example:
 cursorctl --api-key-env MY_CURSOR_KEY models
 ```
 
-Without that variable:
+Without that variable and with no stored profile:
 
 ```text
-error: missing Cursor API key: set --api-key or environment variable MY_CURSOR_KEY
+error: missing Cursor API key: set --api-key, environment variable MY_CURSOR_KEY, or run cursorctl auth add <name>
 ```
+
+Unknown `--profile` / `CURSORCTL_PROFILE` names fail with `unknown auth profile "work"` (the credentials path is not included).
 
 Set the variable by name, not literally `CURSOR_API_KEY`, when overriding:
 
@@ -28,6 +32,15 @@ Set the variable by name, not literally `CURSOR_API_KEY`, when overriding:
 export MY_CURSOR_KEY="cursor_..."
 cursorctl --api-key-env MY_CURSOR_KEY me
 ```
+
+Prefer `cursorctl auth add` over putting `CURSOR_API_KEY` in `~/.zshrc`. Cursor’s `agent` CLI resolves `CURSOR_API_KEY` before keychain/`agent login`, and an invalid or mismatched env key exits instead of falling back. cursorctl reads the profile itself and injects the key only into the SDK Bridge child process.
+
+```bash
+cursorctl auth add work --stdin --default
+cursorctl --profile work me
+```
+
+Credentials live at `$CURSORCTL_CONFIG_DIR/credentials.json`, else `$XDG_CONFIG_HOME/cursorctl/credentials.json`, else `~/.config/cursorctl/credentials.json` (file mode `0600`). Load fails if the file is group- or world-readable.
 
 `me`, `models`, and `repos` are special at the wire layer: catalog RPCs require `options.apiKey` and do not fall back to the bridge process environment. Cursorctl injects the resolved key, including for `--json '{}'`. If calling with raw JSON, an existing `options.apiKey` is preserved.
 
@@ -146,3 +159,9 @@ cursorctl run get "$run_id" --runtime cloud --agent-id "$agent_id"
 Do not pass a `bc-...` agent ID where a run ID is required. For local agent listing/get/messages/archive operations, preserve the original working directory and pass `--cwd`.
 
 `--pr-url` on creation requires exactly one `--repo`. `--repo` accepts HTTPS or SSH-style values and treats a final `@ref` after the last slash as the starting ref.
+
+## Follow-up send and Unknown agent
+
+Each `cursorctl` invocation starts a fresh SDK Bridge. `Send` only sees agents loaded in that process. `agent send` therefore calls `ResumeAgent` before `Send` so a later `cursorctl agent send bc-...` can follow up after `agent prompt --detach` or `agent create`.
+
+If resume/send still returns `Unknown agent`, the cloud record is gone (`agent get` will also fail) or the ID is not a `bc-` cloud agent and needs `--cwd` / `--workspace` matching the original local agent. Do not run a separate `agent resume` in one process and `agent send` in another and expect the first resume to persist.

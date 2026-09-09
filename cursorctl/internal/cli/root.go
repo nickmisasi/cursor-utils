@@ -56,7 +56,8 @@ func NewRootCommand() (*cobra.Command, *App) {
 	flags := root.PersistentFlags()
 	flags.StringVarP(&app.OutputName, "output", "o", "json", "Output format: json, yaml, or toon")
 	flags.StringVar(&app.APIKeyEnv, "api-key-env", "CURSOR_API_KEY", "Environment variable containing the Cursor API key")
-	flags.StringVar(&app.APIKey, "api-key", "", "Cursor API key (sensitive; overrides --api-key-env)")
+	flags.StringVar(&app.APIKey, "api-key", "", "Cursor API key (sensitive; overrides --api-key-env and stored profiles)")
+	flags.StringVar(&app.Profile, "profile", "", "Named auth profile (overrides CURSORCTL_PROFILE and the stored default)")
 	flags.StringVar(&app.Workspace, "workspace", workspace, "Workspace passed to the SDK bridge")
 	flags.StringVar(&app.BridgeBin, "bridge-bin", "", "Path to the SDK bridge binary")
 	flags.StringVar(&app.BridgeVersion, "bridge-version", bridge.DefaultVersion, "SDK bridge release version")
@@ -75,6 +76,7 @@ func NewRootCommand() (*cobra.Command, *App) {
 	flags.BoolVarP(&app.Verbose, "verbose", "v", false, "Show SDK bridge diagnostics")
 
 	root.AddCommand(
+		newAuthCommand(app),
 		newBridgeCommand(app),
 		newAgentCommand(app),
 		newRunCommand(app),

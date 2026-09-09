@@ -1,11 +1,12 @@
 # Cloud delegation patterns
 
-These recipes assume:
+These recipes assume a stored default profile (`cursorctl auth add work --stdin --default`) or a CI one-off `CURSOR_API_KEY`, and:
 
 ```bash
-export CURSOR_API_KEY="cursor_..."
 repo="https://github.com/acme/widgets@main"
 ```
+
+Do not export `CURSOR_API_KEY` in shell rc files; it shadows Cursor’s `agent` CLI login. See [troubleshooting](troubleshooting.md).
 
 Cloud agent IDs begin with `bc-`. Keep agent IDs and run IDs separate.
 
@@ -114,14 +115,14 @@ cursorctl agent send "$agent_id" --quiet \
 
 Parse `.runId`, `.status`, `.result`, and `.git.branches[].prUrl` from each quiet result. For live output, omit `--quiet` and select the NDJSON `result` event.
 
-For an agent created in an earlier process, send directly to its `bc-...` ID:
+For an agent created in an earlier process, send directly to its `bc-...` ID. Each CLI invocation starts a new bridge, so `agent send` calls `ResumeAgent` in that process before `Send`:
 
 ```bash
 cursorctl agent get "$agent_id"
 cursorctl agent send "$agent_id" --quiet "Address the remaining review comments."
 ```
 
-`agent resume` calls the SDK's explicit `ResumeAgent` RPC with a fresh options object. Ordinary cloud follow-up delegation only needs `agent send bc-...`.
+`agent resume` is still available when you need to pass extra create/resume flags (model, MCP, local cwd). Ordinary cloud follow-up only needs `agent send bc-...`.
 
 ## Collect conversations and artifacts
 
